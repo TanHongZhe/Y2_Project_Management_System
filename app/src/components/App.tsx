@@ -23,8 +23,8 @@ interface Tweaks {
 }
 
 const TWEAK_DEFAULTS: Tweaks = {
-  theme: "light",
-  accent: "green",
+  theme: "dark",
+  accent: "amber",
   density: "comfortable",
   surface: "clean",
   dense: false,

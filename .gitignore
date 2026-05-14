@@ -1,0 +1,13 @@
+# Local Claude/agent state
+.claude/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Logs
+*.log

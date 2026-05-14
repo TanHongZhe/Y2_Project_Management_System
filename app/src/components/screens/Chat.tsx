@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { AppData } from '@/lib/data';
+import { MODELS } from '@/lib/models';
+import { renderMarkdown } from '@/lib/markdown';
 import * as Icons from '../Icons';
 
 interface Tweaks {
@@ -63,7 +65,7 @@ function Message({ m }: { m: MessageData }) {
         </div>
         <div className="msg-content">
           {m.streamText
-            ? <p>{m.streamText}{m.streaming && <span className="caret" />}</p>
+            ? renderMarkdown(m.streamText, m.streaming)
             : m.content}
         </div>
 
@@ -143,23 +145,75 @@ export default function Chat({ data, tweaks, setRoute }: ChatProps) {
     },
   ]), []);
 
-  const finalReply = `Logged. I've appended **D-011** to the Decision Log and added the 22 µF X7R cap to the component register (status \`planned\`, est. £0.42 from Mouser).\n\nNext, run a fresh ripple measurement on the bench once the cap is in — I'll watch for the result and link it back to D-011.`;
-
-  function handleSend() {
-    if (!draft.trim() || streaming) return;
-    setStreaming(true);
-    setStreamText("");
-    const words = finalReply.split(" ");
-    let i = 0;
-    const tick = () => {
-      i++;
-      setStreamText(words.slice(0, i).join(" "));
-      if (i < words.length) setTimeout(tick, 40 + Math.random() * 60);
-      else setStreaming(false);
-    };
-    setTimeout(tick, 350);
+  async function handleSend() {
+    const userText = draft.trim();
+    if (!userText || streaming) return;
     setDraft("");
     if (taRef.current) taRef.current.style.height = "auto";
+
+    setStreaming(true);
+    setStreamText("");
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: boost ? "boost" : "flash",
+          stream: true,
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are a hardware-project copilot for the Y2 Solar Bus Demonstrator. Use project memory as ground truth. Be concise and engineering-accurate.",
+            },
+            { role: "user", content: userText },
+          ],
+        }),
+      });
+
+      if (!res.ok || !res.body) {
+        const detail = await res.text().catch(() => "");
+        setStreamText(`⚠️ Request failed (${res.status}). ${detail.slice(0, 240)}`);
+        setStreaming(false);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let acc = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const raw of lines) {
+          const line = raw.trim();
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload || payload === "[DONE]") continue;
+          try {
+            const json = JSON.parse(payload);
+            const delta = json?.choices?.[0]?.delta?.content;
+            if (typeof delta === "string" && delta.length > 0) {
+              acc += delta;
+              setStreamText(acc);
+            }
+          } catch {
+            // ignore keep-alive / partial chunks
+          }
+        }
+      }
+    } catch (err) {
+      setStreamText(`⚠️ ${err instanceof Error ? err.message : "Network error"}`);
+    } finally {
+      setStreaming(false);
+    }
   }
 
   useEffect(() => {
@@ -169,7 +223,7 @@ export default function Chat({ data, tweaks, setRoute }: ChatProps) {
   function onKey(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      void handleSend();
     }
   }
 
@@ -182,21 +236,12 @@ export default function Chat({ data, tweaks, setRoute }: ChatProps) {
 
   const streamMsg: MessageData = {
     role: "ai", who: "ai",
-    model: boost ? "claude-sonnet-4.6" : "gemini-flash",
+    model: boost ? MODELS.boost.id : MODELS.flash.id,
     ts: "now",
     boost,
     streaming,
-    toolCall: !streaming && streamText ? {
-      name: "update_memory",
-      args: 'section: "Decisions", id: "D-011"',
-      diff: 'D-011 — Add 22 µF X7R parallel cap on 3.30 V rail at U3 input. Reduces ripple under LED PWM from 95 mVpp → ~40 mVpp.',
-      status: "applied"
-    } : null,
     streamText,
-    citations: streamText && !streaming ? [
-      { n: 1, file: "project_memory.md", section: "Decisions / D-011" },
-      { n: 2, file: "components.json", section: "C-13 (new)" },
-    ] : [],
+    citations: [],
   };
 
   return (
@@ -254,17 +299,17 @@ export default function Chat({ data, tweaks, setRoute }: ChatProps) {
               <div className="composer-bar">
                 <div className="left">
                   <div className="model-picker">
-                    <button className={!boost ? "active" : ""} onClick={() => setBoost(false)}>
-                      <span>Flash</span><span className="price">~£0.001</span>
+                    <button className={!boost ? "active" : ""} onClick={() => setBoost(false)} title={MODELS.flash.id}>
+                      <span>{MODELS.flash.label}</span><span className="price">mimo-v2</span>
                     </button>
-                    <button className={"boost " + (boost ? "active" : "")} onClick={() => setBoost(true)}>
-                      <Icons.Bolt size={11} /><span>Boost</span><span className="price">~£0.02</span>
+                    <button className={"boost " + (boost ? "active" : "")} onClick={() => setBoost(true)} title={MODELS.boost.id}>
+                      <Icons.Bolt size={11} /><span>{MODELS.boost.label}</span><span className="price">gpt-5.4</span>
                     </button>
                   </div>
                 </div>
                 <div className="right">
                   <span className="hint"><span className="kbd">⏎</span> send · <span className="kbd">⇧⏎</span> newline</span>
-                  <button className="btn primary sm" onClick={handleSend} disabled={!draft.trim() || streaming}>
+                  <button className="btn primary sm" onClick={() => void handleSend()} disabled={!draft.trim() || streaming}>
                     <Icons.Send size={12} />
                     <span>Send</span>
                   </button>
