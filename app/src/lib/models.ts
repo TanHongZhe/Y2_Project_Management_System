@@ -1,6 +1,6 @@
 export const MODELS = {
   flash: {
-    id: "xiaomi/mimo-v2-flash",
+    id: "google/gemma-4-31b-it",
     label: "Flash",
     blurb: "Fast, cheap default.",
   },
