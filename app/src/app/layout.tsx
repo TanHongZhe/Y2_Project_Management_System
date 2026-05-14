@@ -18,6 +18,11 @@ const ibmPlexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Project Memory — Y2 PMS",
   description: "Solar Bus Demonstrator — Project Management System",
+  icons: {
+    icon: "/Y2_logo.png",
+    shortcut: "/Y2_logo.png",
+    apple: "/Y2_logo.png",
+  },
 };
 
 export default function RootLayout({

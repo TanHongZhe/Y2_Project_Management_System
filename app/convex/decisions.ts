@@ -69,6 +69,22 @@ export const createInternal = internalMutation({
   },
 });
 
+export const update = mutation({
+  args: {
+    id: v.id("decisions"),
+    title: v.optional(v.string()),
+    rationale: v.optional(v.string()),
+    tags: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, { id, title, rationale, tags }) => {
+    const patch: Record<string, unknown> = {};
+    if (title !== undefined) patch.title = title;
+    if (rationale !== undefined) patch.rationale = rationale;
+    if (tags !== undefined) patch.tags = tags;
+    await ctx.db.patch(id, patch);
+  },
+});
+
 export const remove = mutation({
   args: { id: v.id("decisions") },
   handler: async (ctx, { id }) => {

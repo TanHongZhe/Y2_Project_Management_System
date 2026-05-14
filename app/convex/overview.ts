@@ -22,6 +22,7 @@ export const stats = query({
       .withIndex("by_uploadedAt")
       .order("desc")
       .take(100);
+    const progressImages = await ctx.db.query("progressImages").take(500);
 
     const statusBreakdown = ["installed", "received", "ordered", "planned"].map(
       (s) => ({
@@ -85,6 +86,7 @@ export const stats = query({
         tests: tests.length,
         memoryNotes: memoryNotes.length,
         documents: documents.length,
+        images: progressImages.length,
       },
       budget: {
         cap: BUDGET_CAP,

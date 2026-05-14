@@ -111,7 +111,10 @@ export const update = mutation({
     estCost: v.optional(v.number()),
     qty: v.optional(v.number()),
     supplier: v.optional(v.string()),
+    model: v.optional(v.string()),
+    specs: v.optional(v.string()),
     notes: v.optional(v.string()),
+    datasheetId: v.optional(v.id("documents")),
   },
   handler: async (ctx, { id, ...patch }) => {
     const clean: Record<string, unknown> = {};
@@ -125,6 +128,19 @@ export const update = mutation({
 export const remove = mutation({
   args: { id: v.id("components") },
   handler: async (ctx, { id }) => {
+    const component = await ctx.db.get(id);
+    if (component?.datasheetId) {
+      const doc = await ctx.db.get(component.datasheetId);
+      if (doc) {
+        const chunks = await ctx.db
+          .query("chunks")
+          .withIndex("by_document", q => q.eq("documentId", component.datasheetId!))
+          .collect();
+        for (const chunk of chunks) await ctx.db.delete(chunk._id);
+        try { await ctx.storage.delete(doc.storageId); } catch { /* already gone */ }
+        await ctx.db.delete(component.datasheetId);
+      }
+    }
     await ctx.db.delete(id);
   },
 });

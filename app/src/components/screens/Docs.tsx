@@ -41,6 +41,7 @@ export default function Docs() {
   const [query, setQuery] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string>("");
+  const [, setReindexingId] = useState<Id<"documents"> | null>(null);
 
   const list = useMemo(() => docs ?? [], [docs]);
   const filtered = useMemo(() => {
@@ -184,7 +185,25 @@ export default function Docs() {
 
         <div className="docs-viewer">
           <div className="doc-content">
-            {activeDoc ? <ActiveDocView doc={activeDoc} onRemove={() => { void removeDoc({ documentId: activeDoc._id }); setActive(null); }} /> : (
+            {activeDoc ? (
+            <ActiveDocView
+              doc={activeDoc}
+              onRemove={() => { void removeDoc({ documentId: activeDoc._id }); setActive(null); }}
+              onReindex={async () => {
+                setReindexingId(activeDoc._id);
+                setUploadStatus(`Re-indexing ${activeDoc.name}…`);
+                try {
+                  await processDocument({ documentId: activeDoc._id });
+                  setUploadStatus(`✓ ${activeDoc.name} re-indexed`);
+                } catch {
+                  setUploadStatus(`✗ Re-index failed`);
+                } finally {
+                  setReindexingId(null);
+                  setTimeout(() => setUploadStatus(""), 3000);
+                }
+              }}
+            />
+          ) : (
               <div style={{ textAlign: "center", padding: 40, color: "var(--text-muted)" }}>
                 {list.length === 0
                   ? "Drop a file in the sidebar to start ingesting."
@@ -198,7 +217,7 @@ export default function Docs() {
   );
 }
 
-function ActiveDocView({ doc, onRemove }: { doc: Doc<"documents">; onRemove: () => void }) {
+function ActiveDocView({ doc, onRemove, onReindex }: { doc: Doc<"documents">; onRemove: () => void; onReindex: () => void }) {
   return (
     <>
       <h1>{doc.name}</h1>
@@ -231,6 +250,9 @@ function ActiveDocView({ doc, onRemove }: { doc: Doc<"documents">; onRemove: () 
       </div>
 
       <div style={{ marginTop: 16, display: "flex", gap: 6 }}>
+        <button className="btn sm" onClick={onReindex} title="Re-parse and re-embed this document" disabled={doc.status === "processing"}>
+          <Icons.Branch size={13} /><span>Re-index</span>
+        </button>
         <button className="btn sm" onClick={onRemove}>
           <Icons.Trash /><span>Remove from index</span>
         </button>

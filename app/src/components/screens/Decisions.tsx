@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
+import { Id } from '../../../convex/_generated/dataModel';
 import * as Icons from '../Icons';
 
 const KNOWN_TAGS = ["arch", "bus", "pv", "bom", "cost", "firmware"];
@@ -10,10 +11,16 @@ const KNOWN_TAGS = ["arch", "bus", "pv", "bom", "cost", "firmware"];
 export default function Decisions() {
   const decisions = useQuery(api.decisions.list, { limit: 200 });
   const create = useMutation(api.decisions.create);
+  const update = useMutation(api.decisions.update);
+  const remove = useMutation(api.decisions.remove);
 
   const [filter, setFilter] = useState("all");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ title: "", rationale: "", tags: "" });
+
+  // Inline edit state
+  const [editingId, setEditingId] = useState<Id<"decisions"> | null>(null);
+  const [editForm, setEditForm] = useState({ title: "", rationale: "", tags: "" });
 
   const list = useMemo(() => decisions ?? [], [decisions]);
 
@@ -38,6 +45,21 @@ export default function Decisions() {
     await create({ title, rationale, tags });
     setForm({ title: "", rationale: "", tags: "" });
     setShowForm(false);
+  }
+
+  function startEdit(d: { _id: Id<"decisions">; title: string; rationale: string; tags: string[] }) {
+    setEditingId(d._id);
+    setEditForm({ title: d.title, rationale: d.rationale, tags: d.tags.join(", ") });
+  }
+
+  async function saveEdit() {
+    if (!editingId) return;
+    const title = editForm.title.trim();
+    const rationale = editForm.rationale.trim();
+    if (!title || !rationale) return;
+    const tags = editForm.tags.split(",").map(t => t.trim()).filter(Boolean);
+    await update({ id: editingId, title, rationale, tags });
+    setEditingId(null);
   }
 
   if (!decisions) {
@@ -74,20 +96,11 @@ export default function Decisions() {
       </header>
 
       <div style={{ padding: "16px 32px 0", display: "flex", gap: 6, flexWrap: "wrap", borderBottom: "1px solid var(--line)" }}>
-        <button
-          className={"chip" + (filter === "all" ? " active" : "")}
-          onClick={() => setFilter("all")}
-          style={{ marginBottom: 12 }}
-        >
+        <button className={"chip" + (filter === "all" ? " active" : "")} onClick={() => setFilter("all")} style={{ marginBottom: 12 }}>
           All <span style={{ opacity: 0.5, marginLeft: 4 }}>{counts.all}</span>
         </button>
         {KNOWN_TAGS.map(tag => (
-          <button
-            key={tag}
-            className={"chip" + (filter === tag ? " active" : "")}
-            onClick={() => setFilter(tag)}
-            style={{ marginBottom: 12 }}
-          >
+          <button key={tag} className={"chip" + (filter === tag ? " active" : "")} onClick={() => setFilter(tag)} style={{ marginBottom: 12 }}>
             {tag.toUpperCase()} <span style={{ opacity: 0.5, marginLeft: 4 }}>{counts[tag] ?? 0}</span>
           </button>
         ))}
@@ -95,28 +108,12 @@ export default function Decisions() {
 
       <div className="body">
         {showForm && (
-          <div className="card" style={{ marginBottom: 16, padding: 16 }}>
+          <div className="card" style={{ marginBottom: 16, padding: 16, maxWidth: 780, margin: "16px auto" }}>
             <h3 style={{ marginTop: 0 }}>New decision</h3>
             <div style={{ display: "grid", gap: 8 }}>
-              <input
-                className="input"
-                placeholder="Title"
-                value={form.title}
-                onChange={e => setForm({ ...form, title: e.target.value })}
-              />
-              <textarea
-                className="input"
-                placeholder="Rationale — why are we doing this?"
-                value={form.rationale}
-                onChange={e => setForm({ ...form, rationale: e.target.value })}
-                style={{ minHeight: 80, resize: "vertical" }}
-              />
-              <input
-                className="input"
-                placeholder="Tags (comma separated, e.g. bus, cost)"
-                value={form.tags}
-                onChange={e => setForm({ ...form, tags: e.target.value })}
-              />
+              <input className="input" placeholder="Title" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
+              <textarea className="input" placeholder="Rationale — why are we doing this?" value={form.rationale} onChange={e => setForm({ ...form, rationale: e.target.value })} style={{ minHeight: 80, resize: "vertical" }} />
+              <input className="input" placeholder="Tags (comma separated, e.g. bus, cost)" value={form.tags} onChange={e => setForm({ ...form, tags: e.target.value })} />
               <div style={{ display: "flex", gap: 6 }}>
                 <button className="btn primary sm" onClick={submit}>Save</button>
                 <button className="btn ghost sm" onClick={() => setShowForm(false)}>Cancel</button>
@@ -128,17 +125,47 @@ export default function Decisions() {
         <div className="decision-list">
           {filtered.map(d => (
             <div className="decision" key={d._id}>
-              <div className="left">
-                <span className="date">{new Date(d.createdAt).toISOString().slice(0, 10)}</span>
-                <span className="id">{d.decisionId}</span>
-              </div>
-              <div className="right">
-                <div className="title">{d.title}</div>
-                <div className="why">{d.rationale}</div>
-                <div className="tags">
-                  {d.tags.map(t => <span key={t} className={"tag " + t}>{t}</span>)}
-                </div>
-              </div>
+              {editingId === d._id ? (
+                <>
+                  <div className="left">
+                    <span className="date">{new Date(d.createdAt).toISOString().slice(0, 10)}</span>
+                    <span className="id">{d.decisionId}</span>
+                  </div>
+                  <div className="right" style={{ display: "grid", gap: 8 }}>
+                    <input className="input" value={editForm.title} onChange={e => setEditForm({ ...editForm, title: e.target.value })} placeholder="Title" />
+                    <textarea className="input" value={editForm.rationale} onChange={e => setEditForm({ ...editForm, rationale: e.target.value })} placeholder="Rationale" style={{ minHeight: 60, resize: "vertical" }} />
+                    <input className="input" value={editForm.tags} onChange={e => setEditForm({ ...editForm, tags: e.target.value })} placeholder="Tags (comma separated)" />
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button className="btn primary sm" onClick={saveEdit}>Save</button>
+                      <button className="btn ghost sm" onClick={() => setEditingId(null)}>Cancel</button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="left">
+                    <span className="date">{new Date(d.createdAt).toISOString().slice(0, 10)}</span>
+                    <span className="id">{d.decisionId}</span>
+                  </div>
+                  <div className="right">
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                      <div className="title" style={{ flex: 1 }}>{d.title}</div>
+                      <div className="decision-actions">
+                        <button className="btn ghost icon-only sm" title="Edit" onClick={() => startEdit(d)}>
+                          <Icons.Edit size={12} />
+                        </button>
+                        <button className="btn ghost icon-only sm" title="Delete" onClick={() => remove({ id: d._id })}>
+                          <Icons.Trash />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="why">{d.rationale}</div>
+                    <div className="tags">
+                      {d.tags.map(t => <span key={t} className={"tag " + t}>{t}</span>)}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           ))}
           {filtered.length === 0 && (

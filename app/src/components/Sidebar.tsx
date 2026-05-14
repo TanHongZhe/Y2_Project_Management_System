@@ -1,9 +1,26 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import * as Icons from './Icons';
+import { AppUser } from '../lib/users';
+
+function SidebarAvatar({ user }: { user: AppUser }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className="sidebar-user-avatar-fallback" style={{ background: user.color }}>
+        {user.initials}
+      </div>
+    );
+  }
+  return (
+    <div className="sidebar-user-avatar" title={user.name}>
+      <img src={user.avatarUrl} alt={user.name} onError={() => setFailed(true)} />
+    </div>
+  );
+}
 
 type Route = string;
 
@@ -12,6 +29,12 @@ interface SidebarProps {
   setRoute: (r: Route) => void;
   selectedThreadId: string | null;
   onSelectThread: (id: string | null) => void;
+  isOpen?: boolean;
+  onClose?: () => void;
+  currentUser: AppUser;
+  onSwitchUser: () => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 const PROJECT = {
@@ -21,9 +44,9 @@ const PROJECT = {
   semester: "Spring 26",
 };
 
-export default function Sidebar({ route, setRoute, selectedThreadId, onSelectThread }: SidebarProps) {
+export default function Sidebar({ route, setRoute, selectedThreadId, onSelectThread, isOpen, onClose, currentUser, onSwitchUser, collapsed, onToggleCollapse }: SidebarProps) {
   const stats = useQuery(api.overview.stats, {});
-  const threads = useQuery(api.threads.list, { limit: 20 });
+  const threads = useQuery(api.threads.list, { limit: 20, userId: currentUser.id });
   const createThread = useMutation(api.threads.create);
 
   const counts = stats?.counts ?? { components: 0, decisions: 0, tests: 0, memoryNotes: 0, documents: 0 };
@@ -31,62 +54,89 @@ export default function Sidebar({ route, setRoute, selectedThreadId, onSelectThr
   const pct = Math.min(1, budget.pct);
 
   async function handleNewSession() {
-    const id = await createThread({ title: "New session" });
+    const id = await createThread({ title: "New session", userId: currentUser.id });
     onSelectThread(String(id));
   }
 
   const navItems = [
     { id: "memory",     label: "Project Memory",  Icon: Icons.Memory, count: String(counts.memoryNotes || "") },
-    { id: "decisions",  label: "Decisions",        Icon: Icons.Gavel,  count: String(counts.decisions || "") },
+    { id: "images",     label: "Images",           Icon: Icons.Image,  count: String((counts as Record<string, number>).images || "") },
     { id: "components", label: "Components",       Icon: Icons.Chip,   count: String(counts.components || "") },
     { id: "tests",      label: "Test Results",     Icon: Icons.Wave,   count: String(counts.tests || "") },
     { id: "docs",       label: "Docs",             Icon: Icons.Folder, count: String(counts.documents || "") },
   ];
 
   return (
-    <aside className="sidebar">
+    <aside className={"sidebar" + (isOpen ? " open" : "") + (collapsed ? " collapsed" : "")}>
       <div className="sidebar-header">
-        <span className="project-id">{PROJECT.id}</span>
-        <span className="project-name">{PROJECT.name}</span>
-        <div className="project-meta">
-          <span>{PROJECT.course}</span>
-          <span>·</span>
-          <span>{PROJECT.semester}</span>
+        {!collapsed && (
+          <>
+            <span className="project-id">{PROJECT.id}</span>
+            <span className="project-name">{PROJECT.name}</span>
+            <div className="project-meta">
+              <span>{PROJECT.course}</span>
+              <span>·</span>
+              <span>{PROJECT.semester}</span>
+            </div>
+          </>
+        )}
+        <div className="sidebar-header-actions">
+          {onClose && (
+            <button className="btn ghost icon-only sidebar-close" onClick={onClose} title="Close">
+              <Icons.X size={16} />
+            </button>
+          )}
+          {onToggleCollapse && (
+            <button
+              className="btn ghost icon-only"
+              onClick={onToggleCollapse}
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              <Icons.Menu size={15} />
+            </button>
+          )}
         </div>
       </div>
 
       <div className="sidebar-nav">
-        <div className="sidebar-section">Workspace</div>
+        {!collapsed && <div className="sidebar-section">Workspace</div>}
 
         <div
           className={"nav-item" + (route === "overview" ? " active" : "")}
           onClick={() => setRoute("overview")}
+          title={collapsed ? "Overview" : undefined}
         >
           <Icons.Dash />
-          <span>Overview</span>
+          {!collapsed && <span>Overview</span>}
         </div>
 
-        {/* Chat + inline thread list */}
         <div
           className={"nav-item" + (route === "chat" ? " active" : "")}
           onClick={() => setRoute("chat")}
-          style={{ justifyContent: "space-between" }}
+          style={collapsed ? undefined : { justifyContent: "space-between" }}
+          title={collapsed ? "Chat" : undefined}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {collapsed ? (
             <Icons.Chat />
-            <span>Chat</span>
-          </div>
-          <button
-            className="btn ghost icon-only"
-            style={{ width: 20, height: 20, padding: 0, flexShrink: 0 }}
-            title="New session"
-            onClick={(e) => { e.stopPropagation(); void handleNewSession(); }}
-          >
-            <Icons.Plus size={12} />
-          </button>
+          ) : (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Icons.Chat />
+                <span>Chat</span>
+              </div>
+              <button
+                className="btn ghost icon-only"
+                style={{ width: 20, height: 20, padding: 0, flexShrink: 0 }}
+                title="New session"
+                onClick={(e) => { e.stopPropagation(); void handleNewSession(); }}
+              >
+                <Icons.Plus size={12} />
+              </button>
+            </>
+          )}
         </div>
 
-        {threads && threads.length > 0 && (
+        {!collapsed && threads && threads.length > 0 && (
           <div className="thread-list" style={{ marginLeft: 16, borderLeft: "1px solid var(--line)", marginBottom: 2 }}>
             {threads.map(t => (
               <div
@@ -108,37 +158,72 @@ export default function Sidebar({ route, setRoute, selectedThreadId, onSelectThr
             key={it.id}
             className={"nav-item" + (route === it.id ? " active" : "")}
             onClick={() => setRoute(it.id)}
+            title={collapsed ? it.label : undefined}
           >
             <it.Icon />
-            <span>{it.label}</span>
-            <span className="count">{it.count}</span>
+            {!collapsed && <span>{it.label}</span>}
+            {!collapsed && <span className="count">{it.count}</span>}
           </div>
         ))}
 
-        <div className="budget-card">
-          <div className="label">
-            <span>Budget</span>
-            <span>{Math.round(pct * 100)}%</span>
+        {!collapsed && (
+          <div className="budget-card">
+            <div className="label">
+              <span>Budget</span>
+              <span>{Math.round(pct * 100)}%</span>
+            </div>
+            <div className="value">
+              <span>£{(budget.committed ?? budget.spent).toFixed(2)}</span>
+              <span className="of">/ £{budget.cap.toFixed(2)}</span>
+            </div>
+            <div className="budget-bar"><span style={{ width: `${pct * 100}%` }} /></div>
           </div>
-          <div className="value">
-            <span>£{(budget.committed ?? budget.spent).toFixed(2)}</span>
-            <span className="of">/ £{budget.cap.toFixed(2)}</span>
+        )}
+
+        {!collapsed && stats?.recentActivity && stats.recentActivity.length > 0 && (
+          <div className="sidebar-activity">
+            <div className="sidebar-section">Recent</div>
+            {stats.recentActivity.slice(0, 4).map((act, i) => (
+              <div key={i} className="act-feed-row">
+                <span className={"act-feed-who" + (act.who === "ai" ? " ai" : "")}>{act.who === "ai" ? "AI" : "YOU"}</span>
+                <span className="act-feed-what">{act.what}</span>
+              </div>
+            ))}
           </div>
-          <div className="budget-bar"><span style={{ width: `${pct * 100}%` }} /></div>
-        </div>
-      </div>{/* end sidebar-nav */}
+        )}
+      </div>
 
       <div className="sidebar-footer">
         <div
           className={"nav-item" + (route === "settings" ? " active" : "")}
           onClick={() => setRoute("settings")}
+          title={collapsed ? "Settings" : undefined}
         >
-          <Icons.Cog /><span>Settings</span>
+          <Icons.Cog />
+          {!collapsed && <span>Settings</span>}
         </div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px 4px" }}>
-          <span className="status-pill"><span className="dot" />Connected</span>
-          <span className="status-pill" style={{ color: "var(--text-faint)" }}>v0.4.0</span>
+
+        <div className="sidebar-user-row">
+          <SidebarAvatar user={currentUser} />
+          {!collapsed && <span className="sidebar-user-name">{currentUser.name}</span>}
+          {!collapsed && (
+            <button
+              className="btn ghost icon-only"
+              style={{ width: 24, height: 24, padding: 0, marginLeft: "auto", flexShrink: 0 }}
+              title="Switch user"
+              onClick={onSwitchUser}
+            >
+              <Icons.SwitchArrows size={13} />
+            </button>
+          )}
         </div>
+
+        {!collapsed && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 12px 4px" }}>
+            <span className="status-pill"><span className="dot" />Connected</span>
+            <span className="status-pill" style={{ color: "var(--text-faint)" }}>v0.4.0</span>
+          </div>
+        )}
       </div>
     </aside>
   );

@@ -22,6 +22,7 @@ interface ChatProps {
   setRoute: (r: string) => void;
   selectedThreadId: string | null;
   onSelectThread: (id: string | null) => void;
+  userId: string;
 }
 
 interface StreamingTool {
@@ -36,6 +37,7 @@ interface PendingAssistant {
   content: string;
   citations: Array<{ file: string; section?: string; url?: string }>;
   toolCalls: StreamingTool[];
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
 }
 
 function ModelIcon({ model }: { model?: string | null }) {
@@ -77,6 +79,7 @@ function MessageBubble({
   toolCalls,
   citations,
   streaming,
+  usage,
 }: {
   role: "user" | "assistant" | "system";
   content: string;
@@ -89,6 +92,7 @@ function MessageBubble({
   }>;
   citations?: Array<{ file: string; section?: string; url?: string }>;
   streaming?: boolean;
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
 }) {
   const isUser = role === "user";
   return (
@@ -98,6 +102,11 @@ function MessageBubble({
         <div className="msg-meta">
           <span className="role">{isUser ? "You" : "Assistant"}</span>
           {model && <span className="model-tag">{model}</span>}
+          {usage?.total_tokens && (
+            <span className="token-badge" title={`${usage.prompt_tokens ?? "?"} prompt + ${usage.completion_tokens ?? "?"} completion`}>
+              {usage.total_tokens.toLocaleString()} tok
+            </span>
+          )}
         </div>
         <div className="msg-content">{renderMarkdown(content, streaming)}</div>
 
@@ -156,9 +165,9 @@ function summariseArgs(rawArgs: string): string {
   }
 }
 
-export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, onSelectThread }: ChatProps) {
+export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, onSelectThread, userId }: ChatProps) {
   void _setRoute;
-  const threads = useQuery(api.threads.list, { limit: 30 });
+  const threads = useQuery(api.threads.list, { limit: 30, userId });
   const createThread = useMutation(api.threads.create);
   const removeThread = useMutation(api.threads.remove);
 
@@ -172,15 +181,25 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
   const [draft, setDraft] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [pending, setPending] = useState<PendingAssistant | null>(null);
+  const [attachedImages, setAttachedImages] = useState<string[]>([]);
+  const [attachedFiles, setAttachedFiles] = useState<Array<{ name: string; content: string }>>([]);
+  const [fileLoading, setFileLoading] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Abort any in-flight stream on unmount
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
 
   const memoryNotes = useQuery(api.memoryNotes.list, {});
   const recentDecisions = useQuery(api.decisions.list, { limit: 5 });
   const recentDocs = useQuery(api.documents.list, { limit: 8 });
 
   async function newThread() {
-    const id = await createThread({ title: "New session" });
+    const id = await createThread({ title: "New session", userId });
     onSelectThread(String(id));
     setPending(null);
   }
@@ -194,15 +213,17 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
 
   async function handleSend() {
     const userText = draft.trim();
-    if (!userText || streaming) return;
+    if (!userText || streaming || fileLoading) return;
     setDraft("");
     if (taRef.current) taRef.current.style.height = "auto";
+    setAttachedImages([]);
+    setAttachedFiles([]);
 
     const isFirstMessage = (messages ?? []).length === 0;
 
     let activeThreadId = threadId;
     if (!activeThreadId) {
-      activeThreadId = (await createThread({ title: "New session" })) as Id<"threads">;
+      activeThreadId = (await createThread({ title: "New session", userId })) as Id<"threads">;
       onSelectThread(String(activeThreadId));
     }
 
@@ -218,13 +239,50 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
     setStreaming(true);
     setPending({ content: "", citations: [], toolCalls: [] });
 
-    const apiMessages: Array<{ role: "user" | "assistant" | "system"; content: string }> = (messages ?? []).map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
-    apiMessages.push({ role: "user", content: userText });
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    type ApiContent = string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+    const apiMessages: Array<{ role: "user" | "assistant" | "system"; content: ApiContent }> = (messages ?? []).map((m) => {
+      let content: string = m.content;
+      if (m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
+        const done = m.toolCalls.filter(tc => tc.status !== "pending");
+        if (done.length > 0) {
+          const summary = done.map(tc => `[${tc.name}: ${tc.result ?? tc.status}]`).join("\n");
+          content = content ? `${content}\n\n${summary}` : summary;
+        }
+      }
+      return { role: m.role, content };
+    });
+
+    // Build the outgoing user content (text + any attachments)
+    let userContent: ApiContent = userText;
+    if (attachedFiles.length > 0) {
+      const fileCtx = attachedFiles.map(f => `=== Attached: ${f.name} ===\n${f.content}`).join("\n\n");
+      userContent = `${fileCtx}\n\n${userText}`;
+    }
+    if (attachedImages.length > 0) {
+      const textPart = typeof userContent === "string" ? userContent : userText;
+      const parts: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
+        { type: "text", text: textPart },
+        ...attachedImages.slice(0, 4).map(url => ({ type: "image_url" as const, image_url: { url } })),
+      ];
+      userContent = parts;
+    }
+
+    apiMessages.push({ role: "user", content: userContent });
 
     try {
+      let temperature = 0.3;
+      let maxTokens = 4096;
+      try {
+        const t = localStorage.getItem("pms-temp");
+        const m = localStorage.getItem("pms-max-tokens");
+        if (t !== null) temperature = parseInt(t) / 100;
+        if (m !== null) maxTokens = parseInt(m);
+      } catch {}
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -232,7 +290,10 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
           model: boost ? "boost" : "flash",
           threadId: activeThreadId,
           messages: apiMessages,
+          temperature,
+          maxTokens,
         }),
+        signal: ctrl.signal,
       });
 
       if (!res.ok || !res.body) {
@@ -293,17 +354,24 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
                 : [...prev.toolCalls, toolCall];
               return { ...prev, toolCalls };
             });
+          } else if (type === "error") {
+            const msg = String(obj.message ?? "Stream error");
+            setPending(prev => prev ? { ...prev, content: prev.content + `\n\n⚠️ ${msg}` } : prev);
           } else if (type === "done") {
-            // server has saved assistant message; clear local pending on next tick once Convex query refreshes
+            const usageData = obj.usage as { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null | undefined;
+            if (usageData) {
+              setPending(prev => prev ? { ...prev, usage: usageData } : prev);
+            }
           }
         }
       }
     } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
       const msg = err instanceof Error ? err.message : "Network error";
       setPending(prev => prev ? { ...prev, content: prev.content + `\n\n⚠️ ${msg}` } : { content: `⚠️ ${msg}`, citations: [], toolCalls: [] });
     } finally {
       setStreaming(false);
-      setTimeout(() => setPending(null), 600);
+      setTimeout(() => setPending(null), 1500);
     }
   }
 
@@ -323,6 +391,49 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
     const el = e.target;
     el.style.height = "auto";
     el.style.height = Math.min(200, el.scrollHeight) + "px";
+  }
+
+  function onComposerPaste(e: React.ClipboardEvent) {
+    const items = Array.from(e.clipboardData?.items ?? []);
+    for (const item of items) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result === "string") {
+            setAttachedImages(prev => [...prev, reader.result as string]);
+          }
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+  }
+
+  async function onFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (files.length === 0) return;
+    setFileLoading(true);
+    try {
+      for (const file of files) {
+        if (file.name.toLowerCase().endsWith(".pdf")) {
+          const fd = new FormData();
+          fd.append("file", file);
+          const res = await fetch("/api/extract-text", { method: "POST", body: fd });
+          if (res.ok) {
+            const { text } = (await res.json()) as { text: string };
+            setAttachedFiles(prev => [...prev, { name: file.name, content: text }]);
+          }
+        } else {
+          const text = await file.text();
+          setAttachedFiles(prev => [...prev, { name: file.name, content: text }]);
+        }
+      }
+    } finally {
+      setFileLoading(false);
+    }
   }
 
   const currentThread = useMemo(
@@ -399,13 +510,41 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
                   toolCalls={pending.toolCalls}
                   citations={pending.citations}
                   streaming={streaming}
+                  usage={pending.usage}
                 />
               )}
             </div>
           </div>
 
           <div className="composer-wrap">
-            <div className="composer">
+            <div className="composer" onPaste={onComposerPaste}>
+              {(attachedImages.length > 0 || attachedFiles.length > 0) && (
+                <div className="attachment-bar">
+                  {attachedImages.map((src, i) => (
+                    <div className="attach-img" key={i}>
+                      <img src={src} alt="attachment" />
+                      <button className="rm" onClick={() => setAttachedImages(prev => prev.filter((_, j) => j !== i))} title="Remove">
+                        <Icons.X size={9} />
+                      </button>
+                    </div>
+                  ))}
+                  {attachedFiles.map((f, i) => (
+                    <div className="attach-file" key={i}>
+                      <Icons.File size={11} />
+                      <span className="fname">{f.name}</span>
+                      <button className="rm" onClick={() => setAttachedFiles(prev => prev.filter((_, j) => j !== i))} title="Remove">
+                        <Icons.X size={10} />
+                      </button>
+                    </div>
+                  ))}
+                  {fileLoading && (
+                    <div className="attach-file">
+                      <Icons.File size={11} />
+                      <span className="fname">Extracting…</span>
+                    </div>
+                  )}
+                </div>
+              )}
               <textarea
                 ref={taRef}
                 placeholder="Ask about the project, or describe a decision to log…"
@@ -423,10 +562,26 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
                       <Icons.Bolt size={11} /><span>{MODELS.boost.label}</span><span className="price">{MODELS.boost.id.split("/")[1]?.slice(0, 10) ?? ""}</span>
                     </button>
                   </div>
+                  <button
+                    className="btn ghost icon-only sm"
+                    title="Attach file or PDF"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={streaming || fileLoading}
+                  >
+                    <Icons.Paperclip size={13} />
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.txt,.md,.json,.csv"
+                    multiple
+                    style={{ display: "none" }}
+                    onChange={(e) => void onFileSelect(e)}
+                  />
                 </div>
                 <div className="right">
-                  <span className="hint"><span className="kbd">⏎</span> send · <span className="kbd">⇧⏎</span> newline</span>
-                  <button className="btn primary sm" onClick={() => void handleSend()} disabled={!draft.trim() || streaming}>
+                  <span className="hint"><span className="kbd">⏎</span> send · <span className="kbd">⇧⏎</span> newline · paste image</span>
+                  <button className="btn primary sm" onClick={() => void handleSend()} disabled={!draft.trim() || streaming || fileLoading}>
                     <Icons.Send size={12} />
                     <span>{streaming ? "…" : "Send"}</span>
                   </button>

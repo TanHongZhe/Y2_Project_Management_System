@@ -7,16 +7,33 @@ import { MODELS, resolveModel, type ModelKey } from "@/lib/models";
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
+type ChatContent =
+  | string
+  | Array<
+      | { type: "text"; text: string }
+      | { type: "image_url"; image_url: { url: string } }
+    >;
+
 type ChatMessage = {
   role: "user" | "assistant" | "system";
-  content: string;
+  content: ChatContent;
 };
+
+function asText(content: ChatContent): string {
+  if (typeof content === "string") return content;
+  return content
+    .filter((p): p is { type: "text"; text: string } => p.type === "text")
+    .map(p => p.text)
+    .join(" ");
+}
 
 type ChatRequest = {
   messages: ChatMessage[];
   model?: ModelKey;
   threadId?: string;
   saveThread?: boolean;
+  temperature?: number;
+  maxTokens?: number;
 };
 
 type ToolName =
@@ -342,7 +359,8 @@ type StreamEvent =
       status: "applied" | "error";
       result: string;
     }
-  | { type: "done" };
+  | { type: "error"; message: string }
+  | { type: "done"; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null };
 
 function sse(event: StreamEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`;
@@ -351,10 +369,8 @@ function sse(event: StreamEvent): string {
 export async function POST(req: NextRequest) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    return Response.json(
-      { error: "OPENROUTER_API_KEY is not set in app/.env.local" },
-      { status: 500 },
-    );
+    console.error("[chat] OPENROUTER_API_KEY is not set");
+    return Response.json({ error: "Server configuration error" }, { status: 500 });
   }
 
   let body: ChatRequest;
@@ -369,10 +385,15 @@ export async function POST(req: NextRequest) {
   }
 
   const modelId = resolveModel(body.model);
+  const isBoost = body.model === "boost";
+  const temperature = isBoost
+    ? Math.min(body.temperature ?? 0.3, 0.3)
+    : Math.max(0, Math.min(1, body.temperature ?? 0.3));
+  const maxTokens = Math.max(256, Math.min(16384, body.maxTokens ?? 4096));
   const convex = getConvex();
 
   const lastUser = [...body.messages].reverse().find((m) => m.role === "user");
-  const userQuery = lastUser?.content ?? "";
+  const userQuery = asText(lastUser?.content ?? "");
 
   let contextBlock = "";
   let citations: Array<{ file: string; section?: string; url?: string }> = [];
@@ -422,10 +443,18 @@ export async function POST(req: NextRequest) {
 
   history.forEach((m, i) => {
     if (i === lastIdx && m.role === "user" && imageRefs.length > 0) {
+      // Merge RAG image refs into the last user message
+      const textPart = asText(m.content);
       const parts: Array<
         | { type: "text"; text: string }
         | { type: "image_url"; image_url: { url: string } }
-      > = [{ type: "text", text: m.content }];
+      > = [{ type: "text", text: textPart }];
+      // Preserve any user-attached images from the multimodal content
+      if (Array.isArray(m.content)) {
+        for (const p of m.content) {
+          if (p.type === "image_url") parts.push(p);
+        }
+      }
       for (const ref of imageRefs.slice(0, 4)) {
         parts.push({ type: "image_url", image_url: { url: ref.url } });
       }
@@ -450,7 +479,7 @@ export async function POST(req: NextRequest) {
         await convex.mutation(api.messages.send, {
           threadId,
           role: "user",
-          content: lastUser.content,
+          content: asText(lastUser.content),
         });
       }
     } catch (err) {
@@ -473,6 +502,9 @@ export async function POST(req: NextRequest) {
       tools: TOOLS,
       tool_choice: "auto",
       stream: true,
+      stream_options: { include_usage: true },
+      temperature,
+      max_tokens: maxTokens,
     }),
   });
 
@@ -491,7 +523,8 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       try {
         if (citations.length > 0) {
-          controller.enqueue(encoder.encode(sse({ type: "citations", citations })));
+          const dedupedCitations = [...new Map(citations.map(c => [c.file, c])).values()];
+          controller.enqueue(encoder.encode(sse({ type: "citations", citations: dedupedCitations })));
         }
 
         const reader = upstream.body!.getReader();
@@ -509,6 +542,7 @@ export async function POST(req: NextRequest) {
         }> = [];
 
         const executedIds = new Set<string>();
+        let usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null = null;
 
         async function maybeExecute(index: number) {
           const t = pendingTools.get(index);
@@ -573,12 +607,14 @@ export async function POST(req: NextRequest) {
                 delta?: OpenRouterStreamDelta;
                 finish_reason?: string | null;
               }>;
+              usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
             };
             try {
               json = JSON.parse(payload);
             } catch {
               continue;
             }
+            if (json.usage) usage = json.usage;
             const delta = json.choices?.[0]?.delta;
             if (!delta) continue;
 
@@ -635,16 +671,13 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        controller.enqueue(encoder.encode(sse({ type: "done" })));
+        controller.enqueue(encoder.encode(sse({ type: "done", usage })));
         controller.close();
       } catch (err) {
+        console.error("[chat/stream]", err);
         const message = err instanceof Error ? err.message : String(err);
-        controller.enqueue(
-          encoder.encode(
-            sse({ type: "content", delta: `\n\n[stream error: ${message}]` }),
-          ),
-        );
-        controller.enqueue(encoder.encode(sse({ type: "done" })));
+        controller.enqueue(encoder.encode(sse({ type: "error", message })));
+        controller.enqueue(encoder.encode(sse({ type: "done", usage: null })));
         controller.close();
       }
     },

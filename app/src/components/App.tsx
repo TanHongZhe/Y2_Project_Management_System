@@ -2,15 +2,19 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from './Sidebar';
+import * as Icons from './Icons';
 import Overview from './screens/Overview';
 import Chat from './screens/Chat';
 import Memory from './screens/Memory';
-import Decisions from './screens/Decisions';
+import Images from './screens/Images';
 import Components from './screens/Components';
 import Tests from './screens/Tests';
 import Docs from './screens/Docs';
 import Settings from './screens/Settings';
 import Empty from './screens/Empty';
+import Login from './screens/Login';
+import CommandPalette from './CommandPalette';
+import { AppUser, getSavedUserId, saveUserId, clearUserId, getUserById } from '../lib/users';
 
 interface Tweaks {
   theme: string;
@@ -34,7 +38,7 @@ const ROUTE_LABELS: Record<string, string> = {
   overview: "Overview",
   chat: "Chat",
   memory: "Project Memory",
-  decisions: "Decision Log",
+  images: "Images",
   components: "Component Register",
   tests: "Test Results",
   docs: "Docs",
@@ -42,13 +46,55 @@ const ROUTE_LABELS: Record<string, string> = {
   empty: "New Session",
 };
 
+function loadTweaks(): Tweaks {
+  try {
+    const raw = localStorage.getItem("pms-tweaks");
+    if (raw) return { ...TWEAK_DEFAULTS, ...JSON.parse(raw) };
+  } catch {}
+  return TWEAK_DEFAULTS;
+}
+
 export default function App() {
-  const [route, setRoute] = useState("overview");
-  const [tweaks, setTweaksState] = useState<Tweaks>(TWEAK_DEFAULTS);
-  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
+    const id = getSavedUserId();
+    return id ? (getUserById(id) ?? null) : null;
+  });
+  const [route, setRouteState] = useState<string>(() => localStorage.getItem("pms-route") ?? "overview");
+  const [tweaks, setTweaksState] = useState<Tweaks>(loadTweaks);
+  const [selectedThreadId, setSelectedThreadIdState] = useState<string | null>(
+    () => localStorage.getItem("pms-thread") ?? null
+  );
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem("pms-sidebar-collapsed") === "true"; } catch { return false; }
+  });
+  const [cmdOpen, setCmdOpen] = useState(false);
+
+  const handleToggleCollapse = useCallback(() => {
+    setSidebarCollapsed(c => {
+      const next = !c;
+      try { localStorage.setItem("pms-sidebar-collapsed", String(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  const setRoute = useCallback((r: string) => {
+    setRouteState(r);
+    localStorage.setItem("pms-route", r);
+  }, []);
+
+  const setSelectedThreadId = useCallback((id: string | null) => {
+    setSelectedThreadIdState(id);
+    if (id) localStorage.setItem("pms-thread", id);
+    else localStorage.removeItem("pms-thread");
+  }, []);
 
   const setTweak = useCallback((key: string, value: unknown) => {
-    setTweaksState(prev => ({ ...prev, [key]: value }));
+    setTweaksState(prev => {
+      const next = { ...prev, [key]: value };
+      try { localStorage.setItem("pms-tweaks", JSON.stringify(next)); } catch {}
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -58,24 +104,92 @@ export default function App() {
     document.documentElement.dataset.surface = tweaks.surface;
   }, [tweaks]);
 
+  // Cmd+K / Ctrl+K global shortcut
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setCmdOpen(o => !o);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  function handleSelectThread(id: string | null) {
+    setSelectedThreadId(id);
+    setRoute("chat");
+    setSidebarOpen(false);
+  }
+
+  function handleSelectUser(user: AppUser) {
+    saveUserId(user.id);
+    setCurrentUser(user);
+    // Reset thread selection when switching users
+    setSelectedThreadId(null);
+  }
+
+  function handleSwitchUser() {
+    clearUserId();
+    setCurrentUser(null);
+    setSelectedThreadId(null);
+  }
+
+  function handleClearThread() {
+    // Called from Settings — clears the message history for the selected thread
+    // The actual mutation is called inside Settings, this just resets local route state if needed
+  }
+
+  if (!currentUser) {
+    return <Login onSelect={handleSelectUser} />;
+  }
+
   let screen: React.ReactNode = null;
-  if (route === "overview")       screen = <Overview setRoute={setRoute} />;
-  else if (route === "chat")      screen = <Chat tweaks={tweaks} setRoute={setRoute} selectedThreadId={selectedThreadId} onSelectThread={setSelectedThreadId} />;
+  if (route === "overview")       screen = <Overview setRoute={setRoute} currentUser={currentUser} />;
+  else if (route === "chat")      screen = <Chat tweaks={tweaks} setRoute={setRoute} selectedThreadId={selectedThreadId} onSelectThread={setSelectedThreadId} userId={currentUser.id} />;
   else if (route === "memory")    screen = <Memory />;
-  else if (route === "decisions") screen = <Decisions />;
+  else if (route === "images")    screen = <Images currentUser={currentUser} />;
   else if (route === "components") screen = <Components />;
   else if (route === "tests")     screen = <Tests />;
   else if (route === "docs")      screen = <Docs />;
-  else if (route === "settings")  screen = <Settings tweaks={tweaks} setTweak={setTweak} />;
+  else if (route === "settings")  screen = <Settings tweaks={tweaks} setTweak={setTweak} selectedThreadId={selectedThreadId} onClearThread={handleClearThread} />;
   else if (route === "empty")     screen = <Empty setRoute={setRoute} />;
 
   return (
-    <div className="app">
-      <Sidebar route={route} setRoute={setRoute} selectedThreadId={selectedThreadId} onSelectThread={(id) => { setSelectedThreadId(id); setRoute("chat"); }} />
+    <div className={"app" + (sidebarCollapsed ? " sidebar-collapsed" : "")}>
+      <Sidebar
+        route={route}
+        setRoute={(r) => { setRoute(r); setSidebarOpen(false); }}
+        selectedThreadId={selectedThreadId}
+        onSelectThread={handleSelectThread}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        currentUser={currentUser}
+        onSwitchUser={handleSwitchUser}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={handleToggleCollapse}
+      />
+      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
       <main className="main" data-screen-label={ROUTE_LABELS[route] ?? route}>
+        <div className="mobile-bar">
+          <button className="btn ghost icon-only" onClick={() => setSidebarOpen(true)}>
+            <Icons.Menu size={18} />
+          </button>
+          <span className="mobile-title">{ROUTE_LABELS[route] ?? route}</span>
+          <button className="btn ghost icon-only" style={{ marginLeft: "auto" }} onClick={() => setCmdOpen(true)} title="Command palette (⌘K)">
+            <Icons.Search />
+          </button>
+        </div>
         {screen}
       </main>
       <TweaksPanel tweaks={tweaks} setTweak={setTweak} route={route} setRoute={setRoute} />
+      {cmdOpen && (
+        <CommandPalette
+          onClose={() => setCmdOpen(false)}
+          onNavigate={(r) => { setRoute(r); setCmdOpen(false); }}
+          currentRoute={route}
+        />
+      )}
     </div>
   );
 }
@@ -113,7 +227,7 @@ function TweaksPanel({
 
   const screens = [
     ["overview", "Overview"], ["chat", "Chat"], ["memory", "Memory"],
-    ["decisions", "Decisions"], ["components", "Components"], ["tests", "Tests"],
+    ["images", "Images"], ["components", "Components"], ["tests", "Tests"],
     ["docs", "Docs"], ["settings", "Settings"], ["empty", "Empty"],
   ];
 

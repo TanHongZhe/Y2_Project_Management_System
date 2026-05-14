@@ -16,7 +16,11 @@ export async function POST(req: NextRequest) {
     return Response.json({ ok: false });
   }
 
-  if (!apiKey || !body.message) return Response.json({ ok: false });
+  if (!apiKey) {
+    console.error("[title] OPENROUTER_API_KEY is not set — thread title will not be generated");
+    return Response.json({ ok: false });
+  }
+  if (!body.message) return Response.json({ ok: false });
 
   try {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {

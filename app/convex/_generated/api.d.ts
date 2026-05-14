@@ -16,9 +16,11 @@ import type * as ingest from "../ingest.js";
 import type * as memoryNotes from "../memoryNotes.js";
 import type * as messages from "../messages.js";
 import type * as overview from "../overview.js";
+import type * as progressImages from "../progressImages.js";
 import type * as rag from "../rag.js";
 import type * as tests from "../tests.js";
 import type * as threads from "../threads.js";
+import type * as todos from "../todos.js";
 
 import type {
   ApiFromModules,
@@ -35,9 +37,11 @@ declare const fullApi: ApiFromModules<{
   memoryNotes: typeof memoryNotes;
   messages: typeof messages;
   overview: typeof overview;
+  progressImages: typeof progressImages;
   rag: typeof rag;
   tests: typeof tests;
   threads: typeof threads;
+  todos: typeof todos;
 }>;
 
 /**

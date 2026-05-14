@@ -51,6 +51,19 @@ export default defineSchema({
     author: v.string(),
   }).index("by_section", ["section"]),
 
+  progressImages: defineTable({
+    storageId: v.id("_storage"),
+    caption: v.optional(v.string()),
+    category: v.optional(v.string()),
+    uploadedBy: v.string(),
+    uploadedAt: v.number(),
+    size: v.optional(v.number()),
+    filename: v.optional(v.string()),
+    mimeType: v.optional(v.string()),
+  })
+    .index("by_uploadedAt", ["uploadedAt"])
+    .index("by_category", ["category"]),
+
   decisions: defineTable({
     decisionId: v.string(),
     title: v.string(),
@@ -78,6 +91,7 @@ export default defineSchema({
     specs: v.optional(v.string()),
     notes: v.optional(v.string()),
     tags: v.array(v.string()),
+    datasheetId: v.optional(v.id("documents")),
     createdAt: v.number(),
   })
     .index("by_ref", ["ref"])
@@ -108,11 +122,23 @@ export default defineSchema({
     .index("by_subsystem", ["subsystem"])
     .index("by_testedAt", ["testedAt"]),
 
+  todos: defineTable({
+    text: v.string(),
+    done: v.boolean(),
+    assignedTo: v.array(v.string()),
+    dueDate: v.optional(v.number()),
+    important: v.optional(v.boolean()),
+    createdAt: v.number(),
+  }).index("by_createdAt", ["createdAt"]),
+
   threads: defineTable({
     title: v.string(),
     createdAt: v.number(),
     lastMessageAt: v.optional(v.number()),
-  }).index("by_lastMessageAt", ["lastMessageAt"]),
+    userId: v.optional(v.string()),
+  })
+    .index("by_lastMessageAt", ["lastMessageAt"])
+    .index("by_userId_lastMessageAt", ["userId", "lastMessageAt"]),
 
   messages: defineTable({
     threadId: v.id("threads"),

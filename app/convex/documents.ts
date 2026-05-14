@@ -101,6 +101,15 @@ export const findByNameInternal = internalQuery({
   },
 });
 
+export const getUrl = query({
+  args: { documentId: v.id("documents") },
+  handler: async (ctx, { documentId }) => {
+    const doc = await ctx.db.get(documentId);
+    if (!doc) return null;
+    return await ctx.storage.getUrl(doc.storageId);
+  },
+});
+
 export const remove = mutation({
   args: { documentId: v.id("documents") },
   handler: async (ctx, { documentId }) => {

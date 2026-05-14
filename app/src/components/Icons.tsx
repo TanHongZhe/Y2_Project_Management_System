@@ -37,6 +37,9 @@ export const File = (p: IconProps) => <Icon {...p}><path d="M14 2H6a2 2 0 0 0-2 
 export const Code = (p: IconProps) => <Icon {...p}><path d="m16 18 6-6-6-6M8 6l-6 6 6 6" /></Icon>;
 export const Pdf = (p: IconProps) => <Icon {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 13h1.5a1.5 1.5 0 1 1 0 3H8zM8 16v2M13 13v5M13 13h1.5a1.5 1.5 0 1 1 0 3H13M17 13v5M17 13h2.5M17 15.5h2" strokeWidth="1.2" /></Icon>;
 export const ArrowUp = (p: IconProps) => <Icon {...p}><path d="M12 19V5M5 12l7-7 7 7" /></Icon>;
+export const SwitchArrows = (p: IconProps) => <Icon {...p}><path d="M17 4l4 4-4 4M3 8h18M7 20l-4-4 4-4M21 16H3" /></Icon>;
+export const ChevronLeft = (p: IconProps) => <Icon {...p}><path d="M15 18l-6-6 6-6" /></Icon>;
+export const ChevronRight = (p: IconProps) => <Icon {...p}><path d="M9 18l6-6-6-6" /></Icon>;
 export const Download = (p: IconProps) => <Icon {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></Icon>;
 export const Filter = (p: IconProps) => <Icon {...p}><path d="M3 4h18l-7 9v6l-4-2v-4z" /></Icon>;
 export const Clock = (p: IconProps) => <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Icon>;
@@ -46,4 +49,8 @@ export const More = (p: IconProps) => <Icon {...p}><circle cx="5" cy="12" r="1.4
 export const Sun = (p: IconProps) => <Icon {...p}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></Icon>;
 export const Moon = (p: IconProps) => <Icon {...p} d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>;
 export const Open = (p: IconProps) => <Icon {...p}><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6M10 14 21 3"/></Icon>;
+export const Star = ({ fill = "none", ...p }: IconProps) => <Icon {...p} fill={fill}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></Icon>;
 export const Restart = (p: IconProps) => <Icon {...p}><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></Icon>;
+export const Paperclip = (p: IconProps) => <Icon {...p}><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></Icon>;
+export const Menu = (p: IconProps) => <Icon {...p}><path d="M3 12h18M3 6h18M3 18h18" /></Icon>;
+export const Image = (p: IconProps) => <Icon {...p}><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></Icon>;
