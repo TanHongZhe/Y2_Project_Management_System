@@ -20,6 +20,8 @@ interface Tweaks {
 interface ChatProps {
   tweaks: Tweaks;
   setRoute: (r: string) => void;
+  selectedThreadId: string | null;
+  onSelectThread: (id: string | null) => void;
 }
 
 interface StreamingTool {
@@ -122,14 +124,13 @@ function summariseArgs(rawArgs: string): string {
   }
 }
 
-export default function Chat({ tweaks, setRoute: _setRoute }: ChatProps) {
+export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, onSelectThread }: ChatProps) {
   void _setRoute;
   const threads = useQuery(api.threads.list, { limit: 30 });
   const createThread = useMutation(api.threads.create);
   const removeThread = useMutation(api.threads.remove);
 
-  const [selectedThreadId, setSelectedThreadId] = useState<Id<"threads"> | null>(null);
-  const threadId = selectedThreadId ?? threads?.[0]?._id ?? null;
+  const threadId = (selectedThreadId as Id<"threads"> | null) ?? threads?.[0]?._id ?? null;
 
   const messages = useQuery(api.messages.listByThread, threadId ? { threadId } : "skip");
 
@@ -148,14 +149,14 @@ export default function Chat({ tweaks, setRoute: _setRoute }: ChatProps) {
 
   async function newThread() {
     const id = await createThread({ title: "New session" });
-    setSelectedThreadId(id as Id<"threads">);
+    onSelectThread(String(id));
     setPending(null);
   }
 
   async function deleteCurrent() {
     if (!threadId) return;
     await removeThread({ threadId });
-    setSelectedThreadId(null);
+    onSelectThread(null);
     setPending(null);
   }
 
@@ -168,7 +169,7 @@ export default function Chat({ tweaks, setRoute: _setRoute }: ChatProps) {
     let activeThreadId = threadId;
     if (!activeThreadId) {
       activeThreadId = (await createThread({ title: userText.slice(0, 60) })) as Id<"threads">;
-      setSelectedThreadId(activeThreadId);
+      onSelectThread(String(activeThreadId));
     }
 
     setStreaming(true);
@@ -440,7 +441,7 @@ export default function Chat({ tweaks, setRoute: _setRoute }: ChatProps) {
                     <div
                       key={t._id}
                       className="item"
-                      onClick={() => setSelectedThreadId(t._id)}
+                      onClick={() => onSelectThread(t._id)}
                       style={{
                         cursor: "pointer",
                         background: threadId === t._id ? "var(--bg-elev)" : undefined,

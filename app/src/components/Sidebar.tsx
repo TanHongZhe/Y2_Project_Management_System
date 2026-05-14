@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { useQuery } from 'convex/react';
+import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import * as Icons from './Icons';
 
@@ -10,6 +10,8 @@ type Route = string;
 interface SidebarProps {
   route: Route;
   setRoute: (r: Route) => void;
+  selectedThreadId: string | null;
+  onSelectThread: (id: string | null) => void;
 }
 
 const PROJECT = {
@@ -19,30 +21,27 @@ const PROJECT = {
   semester: "Spring 26",
 };
 
-export default function Sidebar({ route, setRoute }: SidebarProps) {
+export default function Sidebar({ route, setRoute, selectedThreadId, onSelectThread }: SidebarProps) {
   const stats = useQuery(api.overview.stats, {});
-  const threadCount = useQuery(api.threads.list, { limit: 100 });
+  const threads = useQuery(api.threads.list, { limit: 20 });
+  const createThread = useMutation(api.threads.create);
 
-  const counts = stats?.counts ?? {
-    components: 0,
-    decisions: 0,
-    tests: 0,
-    memoryNotes: 0,
-    documents: 0,
-  };
+  const counts = stats?.counts ?? { components: 0, decisions: 0, tests: 0, memoryNotes: 0, documents: 0 };
   const budget = stats?.budget ?? { spent: 0, cap: 60, pct: 0 };
-
-  const items = [
-    { id: "overview",   label: "Overview",        Icon: Icons.Dash,   count: "" },
-    { id: "chat",       label: "Chat",            Icon: Icons.Chat,   count: threadCount ? String(threadCount.length) : "" },
-    { id: "memory",     label: "Project Memory",  Icon: Icons.Memory, count: String(counts.memoryNotes || "") },
-    { id: "decisions",  label: "Decisions",       Icon: Icons.Gavel,  count: String(counts.decisions || "") },
-    { id: "components", label: "Components",      Icon: Icons.Chip,   count: String(counts.components || "") },
-    { id: "tests",      label: "Test Results",    Icon: Icons.Wave,   count: String(counts.tests || "") },
-    { id: "docs",       label: "Docs",            Icon: Icons.Folder, count: String(counts.documents || "") },
-  ];
-
   const pct = Math.min(1, budget.pct);
+
+  async function handleNewSession() {
+    const id = await createThread({ title: "New session" });
+    onSelectThread(String(id));
+  }
+
+  const navItems = [
+    { id: "memory",     label: "Project Memory",  Icon: Icons.Memory, count: String(counts.memoryNotes || "") },
+    { id: "decisions",  label: "Decisions",        Icon: Icons.Gavel,  count: String(counts.decisions || "") },
+    { id: "components", label: "Components",       Icon: Icons.Chip,   count: String(counts.components || "") },
+    { id: "tests",      label: "Test Results",     Icon: Icons.Wave,   count: String(counts.tests || "") },
+    { id: "docs",       label: "Docs",             Icon: Icons.Folder, count: String(counts.documents || "") },
+  ];
 
   return (
     <aside className="sidebar">
@@ -57,7 +56,53 @@ export default function Sidebar({ route, setRoute }: SidebarProps) {
       </div>
 
       <div className="sidebar-section">Workspace</div>
-      {items.map(it => (
+
+      <div
+        className={"nav-item" + (route === "overview" ? " active" : "")}
+        onClick={() => setRoute("overview")}
+      >
+        <Icons.Dash />
+        <span>Overview</span>
+      </div>
+
+      {/* Chat + inline thread list */}
+      <div
+        className={"nav-item" + (route === "chat" ? " active" : "")}
+        onClick={() => setRoute("chat")}
+        style={{ justifyContent: "space-between" }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Icons.Chat />
+          <span>Chat</span>
+        </div>
+        <button
+          className="btn ghost icon-only"
+          style={{ width: 20, height: 20, padding: 0, flexShrink: 0 }}
+          title="New session"
+          onClick={(e) => { e.stopPropagation(); void handleNewSession(); }}
+        >
+          <Icons.Plus size={12} />
+        </button>
+      </div>
+
+      {threads && threads.length > 0 && (
+        <div style={{ marginLeft: 16, borderLeft: "1px solid var(--line)", marginBottom: 2 }}>
+          {threads.slice(0, 12).map(t => (
+            <div
+              key={t._id}
+              className={"nav-item" + (selectedThreadId === t._id && route === "chat" ? " active" : "")}
+              style={{ paddingLeft: 12, fontSize: 12, minHeight: 28 }}
+              onClick={() => onSelectThread(t._id)}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                {t.title}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {navItems.map(it => (
         <div
           key={it.id}
           className={"nav-item" + (route === it.id ? " active" : "")}
@@ -80,14 +125,6 @@ export default function Sidebar({ route, setRoute }: SidebarProps) {
           <span className="of">/ £{budget.cap.toFixed(2)}</span>
         </div>
         <div className="budget-bar"><span style={{ width: `${pct * 100}%` }} /></div>
-      </div>
-
-      <div
-        className={"nav-item" + (route === "empty" ? " active" : "")}
-        onClick={() => setRoute("empty")}
-        style={{ marginTop: 4 }}
-      >
-        <Icons.Plus /><span>New session</span>
       </div>
 
       <div className="sidebar-footer">

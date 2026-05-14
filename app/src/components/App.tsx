@@ -45,6 +45,7 @@ const ROUTE_LABELS: Record<string, string> = {
 export default function App() {
   const [route, setRoute] = useState("overview");
   const [tweaks, setTweaksState] = useState<Tweaks>(TWEAK_DEFAULTS);
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
 
   const setTweak = useCallback((key: string, value: unknown) => {
     setTweaksState(prev => ({ ...prev, [key]: value }));
@@ -59,7 +60,7 @@ export default function App() {
 
   let screen: React.ReactNode = null;
   if (route === "overview")       screen = <Overview setRoute={setRoute} />;
-  else if (route === "chat")      screen = <Chat tweaks={tweaks} setRoute={setRoute} />;
+  else if (route === "chat")      screen = <Chat tweaks={tweaks} setRoute={setRoute} selectedThreadId={selectedThreadId} onSelectThread={setSelectedThreadId} />;
   else if (route === "memory")    screen = <Memory />;
   else if (route === "decisions") screen = <Decisions />;
   else if (route === "components") screen = <Components />;
@@ -70,7 +71,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <Sidebar route={route} setRoute={setRoute} />
+      <Sidebar route={route} setRoute={setRoute} selectedThreadId={selectedThreadId} onSelectThread={(id) => { setSelectedThreadId(id); setRoute("chat"); }} />
       <main className="main" data-screen-label={ROUTE_LABELS[route] ?? route}>
         {screen}
       </main>
