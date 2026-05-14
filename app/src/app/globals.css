@@ -101,13 +101,17 @@ body {
 .app { display: grid; grid-template-columns: 232px 1fr; height: 100vh; overflow: hidden; }
 [data-density="compact"] .app { grid-template-columns: 208px 1fr; }
 
-.sidebar { background: var(--bg-rail); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.sidebar { background: var(--bg-rail); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.sidebar-nav { flex: 1; overflow: hidden; min-height: 0; padding-bottom: 4px; }
+.thread-list { overflow-y: auto; max-height: calc(3 * 28px); }
+.thread-list::-webkit-scrollbar { width: 3px; }
+.thread-list::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 2px; }
 .sidebar-header { padding: 18px 18px 14px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
 .sidebar-header .project-id { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; color: var(--text-faint); text-transform: uppercase; }
 .sidebar-header .project-name { font-weight: 600; font-size: 14px; letter-spacing: -0.005em; }
 .sidebar-header .project-meta { display: flex; gap: 8px; margin-top: 6px; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
-.sidebar-section { padding: 14px 12px 6px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-faint); text-transform: uppercase; }
-.nav-item { display: flex; align-items: center; gap: 10px; padding: 7px 12px; margin: 0 6px; border-radius: var(--r-md); cursor: pointer; color: var(--text); font-size: 13px; position: relative; user-select: none; }
+.sidebar-section { padding: 8px 12px 4px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-faint); text-transform: uppercase; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 5px 12px; margin: 0 6px; border-radius: var(--r-md); cursor: pointer; color: var(--text); font-size: 13px; position: relative; user-select: none; }
 .nav-item:hover { background: var(--bg-sunk); }
 .nav-item.active { background: var(--bg-elev); box-shadow: inset 0 0 0 1px var(--line); }
 .nav-item.active::before { content: ""; position: absolute; left: -6px; top: 50%; transform: translateY(-50%); width: 2px; height: 14px; background: var(--accent); border-radius: 2px; }
@@ -153,7 +157,7 @@ body {
 .msg-row { display: flex; gap: 14px; align-items: flex-start; }
 .msg-avatar { width: 22px; height: 22px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: 0.02em; background: var(--bg-sunk); color: var(--text-muted); border: 1px solid var(--line); flex: 0 0 22px; margin-top: 2px; }
 .msg-avatar.user { background: var(--text); color: var(--bg); border-color: var(--text); }
-.msg-avatar.ai { background: var(--accent-soft); color: var(--accent-fg); border-color: transparent; }
+.msg-avatar.ai { background: transparent; color: var(--accent-fg); border-color: transparent; overflow: hidden; }
 .msg-body { flex: 1; min-width: 0; }
 .msg-meta { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; color: var(--text-faint); text-transform: uppercase; margin-bottom: 6px; }
 .msg-meta .role { color: var(--text-muted); font-weight: 600; }
@@ -322,9 +326,9 @@ body {
 .metric .mv .unit { color: var(--text-muted); font-size: 11px; }
 
 /* Docs viewer */
-.docs-grid { display: grid; grid-template-columns: 260px 1fr; height: 100%; min-height: 0; }
+.docs-grid { display: grid; grid-template-columns: 320px 1fr; height: 100%; min-height: 0; }
 .docs-side { border-right: 1px solid var(--line); background: var(--bg-rail); display: flex; flex-direction: column; min-height: 0; }
-.docs-side .search { margin: 12px; width: auto; max-width: none; }
+.docs-side .search { margin: 12px; width: auto; max-width: none; height: 24px; flex: none; }
 .docs-list { overflow: auto; flex: 1; padding: 0 8px 12px; }
 .docs-list .group-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); padding: 12px 10px 4px; }
 .docs-item { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: var(--r-sm); cursor: pointer; font-size: 12.5px; color: var(--text); }

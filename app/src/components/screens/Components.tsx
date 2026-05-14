@@ -68,8 +68,8 @@ export default function Components() {
 
   const spent = list.filter(c => c.status !== "planned").reduce((s, c) => s + c.estCost * c.qty, 0);
   const committed = list.reduce((s, c) => s + c.estCost * c.qty, 0);
-  const remain = BUDGET_CAP - spent;
-  const pct = Math.min(1, spent / BUDGET_CAP);
+  const remain = BUDGET_CAP - committed;
+  const pct = Math.min(1, committed / BUDGET_CAP);
 
   function toggleSort(key: SortKey) {
     setSort(s => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : 1 }));

@@ -74,7 +74,7 @@ const TOOLS: ToolDefinition[] = [
           unit: { type: "string", description: "Unit (pcs, m, kit...)" },
           estCost: {
             type: "number",
-            description: "Estimated cost per unit, in GBP",
+            description: "Estimated cost per unit, in GBP. Copy the exact decimal value from the user's message — do not transpose or round digits (e.g. £4.20 → 4.20, not 4.02).",
           },
           supplier: { type: "string", description: "Supplier name" },
           model: { type: "string", description: "Vendor part number / model" },
@@ -156,6 +156,7 @@ Rules:
 - Treat retrieved context (chunks, memory notes, decisions) as ground truth. Cite filenames when you quote specific numbers.
 - When the user reports a decision, measurement, new part, or enduring constraint, call the matching tool to record it. Do not invent confirmation: only call tools when the user clearly intends to log something.
 - Prefer tool calls over verbose prose when the user asks you to "log", "record", "add", "save", or "remember".
+- When calling tools, copy numeric values (prices, quantities, measurements) exactly as stated by the user — never transpose digits (e.g. £4.20 must be passed as 4.20, not 4.02).
 - If a question cannot be answered from retrieved context, say so plainly instead of guessing.
 - Markdown is fine. Keep code blocks short.`;
 
@@ -381,7 +382,10 @@ export async function POST(req: NextRequest) {
     documentName: string;
   }> = [];
 
-  if (convex && userQuery) {
+  // Skip RAG for fully-specified action commands — all data is in the message itself.
+  const isStructuredAction = /^(add|log|record|update|remove|delete)\s+a?\s*(component|part|decision|test|memory)/i.test(userQuery.trim());
+
+  if (convex && userQuery && !isStructuredAction) {
     try {
       const ctxBuilt = await buildContext(convex, userQuery);
       contextBlock = ctxBuilt.textBlock;

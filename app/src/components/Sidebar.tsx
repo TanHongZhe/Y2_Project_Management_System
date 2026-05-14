@@ -27,7 +27,7 @@ export default function Sidebar({ route, setRoute, selectedThreadId, onSelectThr
   const createThread = useMutation(api.threads.create);
 
   const counts = stats?.counts ?? { components: 0, decisions: 0, tests: 0, memoryNotes: 0, documents: 0 };
-  const budget = stats?.budget ?? { spent: 0, cap: 60, pct: 0 };
+  const budget = stats?.budget ?? { spent: 0, committed: 0, cap: 60, pct: 0 };
   const pct = Math.min(1, budget.pct);
 
   async function handleNewSession() {
@@ -55,77 +55,78 @@ export default function Sidebar({ route, setRoute, selectedThreadId, onSelectThr
         </div>
       </div>
 
-      <div className="sidebar-section">Workspace</div>
+      <div className="sidebar-nav">
+        <div className="sidebar-section">Workspace</div>
 
-      <div
-        className={"nav-item" + (route === "overview" ? " active" : "")}
-        onClick={() => setRoute("overview")}
-      >
-        <Icons.Dash />
-        <span>Overview</span>
-      </div>
-
-      {/* Chat + inline thread list */}
-      <div
-        className={"nav-item" + (route === "chat" ? " active" : "")}
-        onClick={() => setRoute("chat")}
-        style={{ justifyContent: "space-between" }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Icons.Chat />
-          <span>Chat</span>
-        </div>
-        <button
-          className="btn ghost icon-only"
-          style={{ width: 20, height: 20, padding: 0, flexShrink: 0 }}
-          title="New session"
-          onClick={(e) => { e.stopPropagation(); void handleNewSession(); }}
-        >
-          <Icons.Plus size={12} />
-        </button>
-      </div>
-
-      {threads && threads.length > 0 && (
-        <div style={{ marginLeft: 16, borderLeft: "1px solid var(--line)", marginBottom: 2 }}>
-          {threads.slice(0, 12).map(t => (
-            <div
-              key={t._id}
-              className={"nav-item" + (selectedThreadId === t._id && route === "chat" ? " active" : "")}
-              style={{ paddingLeft: 12, fontSize: 12, minHeight: 28 }}
-              onClick={() => onSelectThread(t._id)}
-            >
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                {t.title}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {navItems.map(it => (
         <div
-          key={it.id}
-          className={"nav-item" + (route === it.id ? " active" : "")}
-          onClick={() => setRoute(it.id)}
+          className={"nav-item" + (route === "overview" ? " active" : "")}
+          onClick={() => setRoute("overview")}
         >
-          <it.Icon />
-          <span>{it.label}</span>
-          <span className="count">{it.count}</span>
+          <Icons.Dash />
+          <span>Overview</span>
         </div>
-      ))}
 
-      <div className="sidebar-section">Project</div>
-      <div className="budget-card">
-        <div className="label">
-          <span>Budget</span>
-          <span>{Math.round(pct * 100)}%</span>
+        {/* Chat + inline thread list */}
+        <div
+          className={"nav-item" + (route === "chat" ? " active" : "")}
+          onClick={() => setRoute("chat")}
+          style={{ justifyContent: "space-between" }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Icons.Chat />
+            <span>Chat</span>
+          </div>
+          <button
+            className="btn ghost icon-only"
+            style={{ width: 20, height: 20, padding: 0, flexShrink: 0 }}
+            title="New session"
+            onClick={(e) => { e.stopPropagation(); void handleNewSession(); }}
+          >
+            <Icons.Plus size={12} />
+          </button>
         </div>
-        <div className="value">
-          <span>£{budget.spent.toFixed(2)}</span>
-          <span className="of">/ £{budget.cap.toFixed(2)}</span>
+
+        {threads && threads.length > 0 && (
+          <div className="thread-list" style={{ marginLeft: 16, borderLeft: "1px solid var(--line)", marginBottom: 2 }}>
+            {threads.map(t => (
+              <div
+                key={t._id}
+                className={"nav-item" + (selectedThreadId === t._id && route === "chat" ? " active" : "")}
+                style={{ paddingLeft: 12, fontSize: 12, minHeight: 28 }}
+                onClick={() => onSelectThread(t._id)}
+              >
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                  {t.title}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {navItems.map(it => (
+          <div
+            key={it.id}
+            className={"nav-item" + (route === it.id ? " active" : "")}
+            onClick={() => setRoute(it.id)}
+          >
+            <it.Icon />
+            <span>{it.label}</span>
+            <span className="count">{it.count}</span>
+          </div>
+        ))}
+
+        <div className="budget-card">
+          <div className="label">
+            <span>Budget</span>
+            <span>{Math.round(pct * 100)}%</span>
+          </div>
+          <div className="value">
+            <span>£{(budget.committed ?? budget.spent).toFixed(2)}</span>
+            <span className="of">/ £{budget.cap.toFixed(2)}</span>
+          </div>
+          <div className="budget-bar"><span style={{ width: `${pct * 100}%` }} /></div>
         </div>
-        <div className="budget-bar"><span style={{ width: `${pct * 100}%` }} /></div>
-      </div>
+      </div>{/* end sidebar-nav */}
 
       <div className="sidebar-footer">
         <div

@@ -70,7 +70,7 @@ export default function Overview({ setRoute }: OverviewProps) {
                 {counts.decisions} decision{counts.decisions === 1 ? "" : "s"} logged,{" "}
                 {counts.tests} test{counts.tests === 1 ? "" : "s"} on record,{" "}
                 {counts.documents} document{counts.documents === 1 ? "" : "s"} ingested.
-                Budget <strong>{Math.round(budget.pct * 100)}%</strong> spent
+                Budget <strong>{Math.round(budget.pct * 100)}%</strong> committed
                 — £{budget.remaining.toFixed(2)} remaining of £{budget.cap.toFixed(2)}.
               </p>
             </div>
@@ -89,7 +89,7 @@ export default function Overview({ setRoute }: OverviewProps) {
             <div className="kpi-cell">
               <div className="kpi-label">Budget remaining</div>
               <div className="kpi-value">£{budget.remaining.toFixed(2)}</div>
-              <div className="kpi-sub">{Math.round(budget.pct * 100)}% of £{budget.cap.toFixed(0)} spent</div>
+              <div className="kpi-sub">{Math.round(budget.pct * 100)}% of £{budget.cap.toFixed(0)} committed</div>
             </div>
             <div className="kpi-cell">
               <div className="kpi-label">Decisions</div>
