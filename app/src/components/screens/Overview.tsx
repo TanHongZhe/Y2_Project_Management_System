@@ -176,15 +176,17 @@ export default function Overview({ setRoute, currentUser }: OverviewProps) {
     let list: TodoItem[] = [...todos];
     if (myTodosOnly) list = list.filter((t: TodoItem) => t.assignedTo.includes(currentUser.id));
     return list.sort((a, b) => {
-      // Important always rises within its date bucket
-      // Primary: has due date first, then no due date
+      // Done tasks always sink to the bottom
+      if (a.done && !b.done) return 1;
+      if (!a.done && b.done) return -1;
+      // Important items pinned to the top within each group
+      if (a.important && !b.important) return -1;
+      if (!a.important && b.important) return 1;
+      // Within same group, sort by due date
       const aHas = !!a.dueDate, bHas = !!b.dueDate;
       if (aHas && !bHas) return -1;
       if (!aHas && bHas) return 1;
       if (aHas && bHas && a.dueDate !== b.dueDate) return a.dueDate! - b.dueDate!;
-      // Secondary: important first
-      if (a.important && !b.important) return -1;
-      if (!a.important && b.important) return 1;
       return 0;
     });
   }, [todos, myTodosOnly, currentUser.id]);
@@ -374,15 +376,10 @@ export default function Overview({ setRoute, currentUser }: OverviewProps) {
                           }}
                         />
                         <button
-                          className={`todo-star${todo.important ? " active" : ""}`}
+                          className={`todo-important-btn${todo.important ? " active" : ""}`}
                           onClick={() => setImportant({ id: todo._id, important: !todo.important })}
-                          title={todo.important ? "Remove important" : "Mark as important"}
                         >
-                          <Icons.Star
-                            size={13}
-                            fill={todo.important ? "var(--warn)" : "none"}
-                            stroke={todo.important ? "var(--warn)" : "currentColor"}
-                          />
+                          {todo.important ? "Important" : "Mark as Important"}
                         </button>
                         <div className="todo-actions">
                           <button

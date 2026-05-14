@@ -155,7 +155,7 @@ export default function Docs() {
                 onClick={() => setActive(d._id)}
               >
                 {iconFor(d.type)}
-                <span>{d.name}</span>
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</span>
                 <span className="size">
                   {d.status === "ready" ? fmtSize(d.size) : <em style={{ color: "var(--text-faint)" }}>{d.status}</em>}
                 </span>

@@ -374,7 +374,7 @@ export default function Components() {
                 </label>
                 <div
                   className={"img-dropzone" + (formDragOver ? " drag-over" : "")}
-                  style={{ padding: "10px 16px", flexDirection: "row", gap: 10, cursor: "pointer", width: "100%", boxSizing: "border-box" }}
+                  style={{ padding: "10px 16px", flexDirection: "row", justifyContent: "flex-start", gap: 10, cursor: "pointer", width: "100%", boxSizing: "border-box", margin: 0 }}
                   onClick={() => !formFile && formFileRef.current?.click()}
                   onDragOver={(e: DragEvent) => { e.preventDefault(); setFormDragOver(true); }}
                   onDragLeave={() => setFormDragOver(false)}
