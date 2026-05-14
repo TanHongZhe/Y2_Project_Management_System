@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { AppData } from '@/lib/data';
+import { useQuery } from 'convex/react';
+import { api } from '../../convex/_generated/api';
 import * as Icons from './Icons';
 
 type Route = string;
@@ -9,32 +10,49 @@ type Route = string;
 interface SidebarProps {
   route: Route;
   setRoute: (r: Route) => void;
-  data: AppData;
 }
 
-export default function Sidebar({ route, setRoute, data }: SidebarProps) {
+const PROJECT = {
+  id: "Y2-PMS-001",
+  name: "Solar Bus Demonstrator",
+  course: "ENG2-SYS",
+  semester: "Spring 26",
+};
+
+export default function Sidebar({ route, setRoute }: SidebarProps) {
+  const stats = useQuery(api.overview.stats, {});
+  const threadCount = useQuery(api.threads.list, { limit: 100 });
+
+  const counts = stats?.counts ?? {
+    components: 0,
+    decisions: 0,
+    tests: 0,
+    memoryNotes: 0,
+    documents: 0,
+  };
+  const budget = stats?.budget ?? { spent: 0, cap: 60, pct: 0 };
+
   const items = [
     { id: "overview",   label: "Overview",        Icon: Icons.Dash,   count: "" },
-    { id: "chat",       label: "Chat",            Icon: Icons.Chat,   count: "12" },
-    { id: "memory",     label: "Project Memory",  Icon: Icons.Memory, count: "7" },
-    { id: "decisions",  label: "Decisions",       Icon: Icons.Gavel,  count: "10" },
-    { id: "components", label: "Components",      Icon: Icons.Chip,   count: "12" },
-    { id: "tests",      label: "Test Results",    Icon: Icons.Wave,   count: "21" },
-    { id: "docs",       label: "Docs",            Icon: Icons.Folder, count: "16" },
+    { id: "chat",       label: "Chat",            Icon: Icons.Chat,   count: threadCount ? String(threadCount.length) : "" },
+    { id: "memory",     label: "Project Memory",  Icon: Icons.Memory, count: String(counts.memoryNotes || "") },
+    { id: "decisions",  label: "Decisions",       Icon: Icons.Gavel,  count: String(counts.decisions || "") },
+    { id: "components", label: "Components",      Icon: Icons.Chip,   count: String(counts.components || "") },
+    { id: "tests",      label: "Test Results",    Icon: Icons.Wave,   count: String(counts.tests || "") },
+    { id: "docs",       label: "Docs",            Icon: Icons.Folder, count: String(counts.documents || "") },
   ];
 
-  const spent = data.components.reduce((s, c) => c.status !== "planned" ? s + c.cost : s, 0);
-  const pct = Math.min(1, spent / data.project.budgetCap);
+  const pct = Math.min(1, budget.pct);
 
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <span className="project-id">{data.project.id}</span>
-        <span className="project-name">{data.project.name}</span>
+        <span className="project-id">{PROJECT.id}</span>
+        <span className="project-name">{PROJECT.name}</span>
         <div className="project-meta">
-          <span>{data.project.course}</span>
+          <span>{PROJECT.course}</span>
           <span>·</span>
-          <span>{data.project.semester}</span>
+          <span>{PROJECT.semester}</span>
         </div>
       </div>
 
@@ -58,8 +76,8 @@ export default function Sidebar({ route, setRoute, data }: SidebarProps) {
           <span>{Math.round(pct * 100)}%</span>
         </div>
         <div className="value">
-          <span>£{spent.toFixed(2)}</span>
-          <span className="of">/ £{data.project.budgetCap.toFixed(2)}</span>
+          <span>£{budget.spent.toFixed(2)}</span>
+          <span className="of">/ £{budget.cap.toFixed(2)}</span>
         </div>
         <div className="budget-bar"><span style={{ width: `${pct * 100}%` }} /></div>
       </div>
@@ -81,7 +99,7 @@ export default function Sidebar({ route, setRoute, data }: SidebarProps) {
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px 4px" }}>
           <span className="status-pill"><span className="dot" />Connected</span>
-          <span className="status-pill" style={{ color: "var(--text-faint)" }}>v0.3.1</span>
+          <span className="status-pill" style={{ color: "var(--text-faint)" }}>v0.4.0</span>
         </div>
       </div>
     </aside>

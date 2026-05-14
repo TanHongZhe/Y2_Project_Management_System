@@ -8,7 +8,17 @@
  * @module
  */
 
+import type * as chunks from "../chunks.js";
+import type * as components_ from "../components.js";
+import type * as decisions from "../decisions.js";
+import type * as documents from "../documents.js";
+import type * as ingest from "../ingest.js";
+import type * as memoryNotes from "../memoryNotes.js";
 import type * as messages from "../messages.js";
+import type * as overview from "../overview.js";
+import type * as rag from "../rag.js";
+import type * as tests from "../tests.js";
+import type * as threads from "../threads.js";
 
 import type {
   ApiFromModules,
@@ -17,7 +27,17 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  chunks: typeof chunks;
+  components: typeof components_;
+  decisions: typeof decisions;
+  documents: typeof documents;
+  ingest: typeof ingest;
+  memoryNotes: typeof memoryNotes;
   messages: typeof messages;
+  overview: typeof overview;
+  rag: typeof rag;
+  tests: typeof tests;
+  threads: typeof threads;
 }>;
 
 /**

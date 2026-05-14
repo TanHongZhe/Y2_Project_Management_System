@@ -1,79 +1,91 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
-import { AppData, MemoryBlock } from '@/lib/data';
+import React, { useState, useRef, useMemo } from 'react';
+import { useQuery, useMutation } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
+import { Id } from '../../../convex/_generated/dataModel';
+import { renderMarkdown } from '@/lib/markdown';
 import * as Icons from '../Icons';
 
-interface MemoryProps {
-  data: AppData;
-}
+export default function Memory() {
+  const notes = useQuery(api.memoryNotes.list, {});
+  const upsert = useMutation(api.memoryNotes.upsert);
+  const remove = useMutation(api.memoryNotes.remove);
 
-function renderInline(text: string): React.ReactNode[] {
-  const parts: React.ReactNode[] = [];
-  const re = /(\*\*[^*]+\*\*|`[^`]+`)/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) parts.push(text.slice(last, m.index));
-    const t = m[0];
-    if (t.startsWith("**")) parts.push(<strong key={m.index}>{t.slice(2, -2)}</strong>);
-    else parts.push(<code key={m.index}>{t.slice(1, -1)}</code>);
-    last = re.lastIndex;
-  }
-  if (last < text.length) parts.push(text.slice(last));
-  return parts;
-}
-
-function renderBlocks(blocks: MemoryBlock[]): React.ReactNode {
-  return blocks.map((b, i) => {
-    if (b.type === "p" && b.text) return <p key={i}>{renderInline(b.text)}</p>;
-    if (b.type === "ul" && b.items) return <ul key={i}>{b.items.map((x, j) => <li key={j}>{renderInline(x)}</li>)}</ul>;
-    if (b.type === "ol" && b.items) return <ol key={i}>{b.items.map((x, j) => <li key={j}>{renderInline(x)}</li>)}</ol>;
-    if (b.type === "kv" && b.rows) {
-      return (
-        <div key={i} className="kv">
-          {b.rows.map((r, j) => (
-            <React.Fragment key={j}>
-              <div className="k">{r[0]}</div>
-              <div>{r[1]}</div>
-            </React.Fragment>
-          ))}
-        </div>
-      );
-    }
-    return null;
-  });
-}
-
-export default function Memory({ data }: MemoryProps) {
-  const [activeId, setActiveId] = useState(data.memorySections[0].id);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<Id<"memoryNotes"> | null>(null);
+  const [draft, setDraft] = useState("");
+  const [newSection, setNewSection] = useState("");
+  const [showNew, setShowNew] = useState(false);
   const refs = useRef<Record<string, HTMLElement | null>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const sections = useMemo(() => notes ?? [], [notes]);
+  const activeId = selectedId ?? sections[0]?._id ?? null;
+
   function jump(id: string) {
-    setActiveId(id);
+    setSelectedId(id);
     const el = refs.current[id];
     if (el && scrollRef.current) {
       scrollRef.current.scrollTo({ top: el.offsetTop - 20, behavior: "smooth" });
     }
   }
 
-  const totalEntries = data.memorySections.length;
-  const lastUpdate = "2026-05-14 11:42";
-  const sizeKb = "2.8";
+  function beginEdit(id: Id<"memoryNotes">, content: string) {
+    setEditingId(id);
+    setDraft(content);
+  }
+
+  async function commitEdit(section: string) {
+    if (!editingId) return;
+    await upsert({ section, content: draft, author: "you" });
+    setEditingId(null);
+  }
+
+  async function createSection() {
+    const title = newSection.trim();
+    if (!title) return;
+    await upsert({ section: title, content: "", author: "you" });
+    setNewSection("");
+    setShowNew(false);
+  }
+
+  async function deleteSection(id: Id<"memoryNotes">) {
+    await remove({ id });
+    if (editingId === id) setEditingId(null);
+  }
+
+  if (!notes) {
+    return (
+      <>
+        <header className="screen-header">
+          <div className="title-block">
+            <div className="crumb">Workspace · project_memory</div>
+            <h1>Project Memory</h1>
+          </div>
+        </header>
+        <div className="body"><div style={{ padding: 40, color: "var(--text-muted)" }}>Loading…</div></div>
+      </>
+    );
+  }
+
+  const totalEntries = sections.length;
+  const lastUpdate = sections.reduce((max, s) => Math.max(max, s.updatedAt), 0);
+  const lastUpdateStr = lastUpdate ? new Date(lastUpdate).toISOString().slice(0, 16).replace("T", " ") : "—";
+  const bytes = sections.reduce((s, n) => s + n.content.length, 0);
 
   return (
     <>
       <header className="screen-header">
         <div className="title-block">
-          <div className="crumb">Workspace · project_memory.md</div>
+          <div className="crumb">Workspace · project_memory</div>
           <h1>Project Memory</h1>
         </div>
         <div className="actions">
           <button className="btn ghost sm"><Icons.Eye /><span>Raw markdown</span></button>
-          <button className="btn sm"><Icons.Download /><span>Export</span></button>
-          <button className="btn primary sm"><Icons.Plus /><span>New section</span></button>
+          <button className="btn primary sm" onClick={() => setShowNew(s => !s)}>
+            <Icons.Plus /><span>New section</span>
+          </button>
         </div>
       </header>
 
@@ -82,70 +94,119 @@ export default function Memory({ data }: MemoryProps) {
           <div style={{ padding: "0 10px 10px", fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-faint)" }}>
             Sections · {totalEntries}
           </div>
-          {data.memorySections.map(s => (
+          {sections.map(s => (
             <div
-              key={s.id}
-              className={"toc-item" + (activeId === s.id ? " active" : "")}
-              onClick={() => jump(s.id)}
+              key={s._id}
+              className={"toc-item" + (activeId === s._id ? " active" : "")}
+              onClick={() => jump(s._id)}
             >
               <span className="dot" />
-              <span>{s.title}</span>
-              <span className="num">{s.id === "decisions" ? "10" : ""}</span>
+              <span>{s.section}</span>
+              <span className="num">{s.author === "ai" ? "ai" : ""}</span>
             </div>
           ))}
+          {sections.length === 0 && (
+            <div style={{ padding: 16, color: "var(--text-muted)", fontSize: 12 }}>
+              No sections yet. Click <em>New section</em> above.
+            </div>
+          )}
         </div>
 
         <div className="memory-doc" ref={scrollRef}>
           <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-faint)", marginBottom: 4 }}>
-            project_memory.md
+            project_memory
           </div>
           <h1 style={{ fontSize: 22, fontWeight: 600, margin: "0 0 4px", letterSpacing: "-0.01em" }}>
-            {data.project.name} — Living Memory
+            Solar Bus Demonstrator — Living Memory
           </h1>
           <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-muted)" }}>
-            last updated {lastUpdate} · {sizeKb} kB · {totalEntries} sections
+            last updated {lastUpdateStr} · {(bytes / 1024).toFixed(1)} kB · {totalEntries} sections
           </div>
 
-          <div className="memory-meta-row">
-            <div className="meta-card">
-              <div className="l">AI writes today</div>
-              <div className="v">7</div>
-            </div>
-            <div className="meta-card">
-              <div className="l">Manual edits today</div>
-              <div className="v">2</div>
-            </div>
-            <div className="meta-card">
-              <div className="l">Context size</div>
-              <div className="v">38 kB</div>
-            </div>
-            <div className="meta-card">
-              <div className="l">Sections</div>
-              <div className="v">{totalEntries}</div>
-            </div>
-          </div>
-
-          {data.memorySections.map(s => (
-            <section
-              key={s.id}
-              className={"memory-section" + (editingId === s.id ? " editing" : "")}
-              ref={(el: HTMLElement | null) => { refs.current[s.id] = el; }}
-              onMouseEnter={() => setActiveId(s.id)}
-            >
+          {showNew && (
+            <div className="memory-section editing" style={{ marginTop: 18 }}>
               <header>
-                <h2>## {s.title}</h2>
-                <span className="author">{s.author}</span>
-                <span className="updated">updated {s.updated}</span>
-                <button className="btn ghost sm edit-btn" onClick={() => setEditingId(editingId === s.id ? null : s.id)}>
-                  {editingId === s.id ? <><Icons.Check /><span>Done</span></> : <><Icons.Edit /><span>Edit</span></>}
+                <h2>## New section</h2>
+                <input
+                  autoFocus
+                  className="input"
+                  placeholder="Section title"
+                  value={newSection}
+                  onChange={e => setNewSection(e.target.value)}
+                  style={{ flex: 1, marginLeft: 12 }}
+                />
+                <button className="btn primary sm" onClick={createSection}>
+                  <Icons.Check /><span>Create</span>
+                </button>
+                <button className="btn ghost sm" onClick={() => setShowNew(false)}>
+                  <span>Cancel</span>
                 </button>
               </header>
-              <div
-                className="content"
-                contentEditable={editingId === s.id}
-                suppressContentEditableWarning
-              >
-                {renderBlocks(s.content)}
+            </div>
+          )}
+
+          {sections.length === 0 && !showNew && (
+            <div style={{ marginTop: 40, padding: 32, border: "1px dashed var(--line)", borderRadius: 8, textAlign: "center", color: "var(--text-muted)" }}>
+              No memory sections yet. The assistant adds these via <code>update_memory</code>,
+              or click <em>New section</em> to add your own.
+            </div>
+          )}
+
+          {sections.map(s => (
+            <section
+              key={s._id}
+              className={"memory-section" + (editingId === s._id ? " editing" : "")}
+              ref={(el: HTMLElement | null) => { refs.current[s._id] = el; }}
+              onMouseEnter={() => setSelectedId(s._id)}
+            >
+              <header>
+                <h2>## {s.section}</h2>
+                <span className="author">{s.author}</span>
+                <span className="updated">updated {new Date(s.updatedAt).toISOString().slice(0, 10)}</span>
+                {editingId === s._id ? (
+                  <>
+                    <button className="btn primary sm edit-btn" onClick={() => commitEdit(s.section)}>
+                      <Icons.Check /><span>Save</span>
+                    </button>
+                    <button className="btn ghost sm" onClick={() => setEditingId(null)}>
+                      <span>Cancel</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="btn ghost sm edit-btn" onClick={() => beginEdit(s._id, s.content)}>
+                      <Icons.Edit /><span>Edit</span>
+                    </button>
+                    <button className="btn ghost sm" onClick={() => deleteSection(s._id)}>
+                      <Icons.Trash /><span>Delete</span>
+                    </button>
+                  </>
+                )}
+              </header>
+              <div className="content">
+                {editingId === s._id ? (
+                  <textarea
+                    autoFocus
+                    value={draft}
+                    onChange={e => setDraft(e.target.value)}
+                    style={{
+                      width: "100%",
+                      minHeight: 180,
+                      background: "var(--bg-elev)",
+                      border: "1px solid var(--line)",
+                      borderRadius: 4,
+                      padding: 10,
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 12.5,
+                      color: "var(--text)",
+                      resize: "vertical",
+                    }}
+                  />
+                ) : s.content.trim() ? (
+                  renderMarkdown(s.content)
+                ) : (
+                  <p style={{ color: "var(--text-faint)" }}>Empty — click <em>Edit</em> to write.</p>
+                )}
               </div>
             </section>
           ))}

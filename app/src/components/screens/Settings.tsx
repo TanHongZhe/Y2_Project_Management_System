@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState } from 'react';
-import { AppData } from '@/lib/data';
 import * as Icons from '../Icons';
 
 interface Tweaks {
@@ -14,7 +13,6 @@ interface Tweaks {
 }
 
 interface SettingsProps {
-  data: AppData;
   tweaks: Tweaks;
   setTweak: (key: string, value: unknown) => void;
 }

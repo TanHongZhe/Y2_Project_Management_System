@@ -1,68 +1,140 @@
 'use client';
 
-import React, { useState } from 'react';
-import { AppData } from '@/lib/data';
+import React, { useState, useMemo } from 'react';
+import { useQuery, useMutation } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import * as Icons from '../Icons';
 
-interface DecisionsProps {
-  data: AppData;
-}
+const KNOWN_TAGS = ["arch", "bus", "pv", "bom", "cost", "firmware"];
 
-export default function Decisions({ data }: DecisionsProps) {
+export default function Decisions() {
+  const decisions = useQuery(api.decisions.list, { limit: 200 });
+  const create = useMutation(api.decisions.create);
+
   const [filter, setFilter] = useState("all");
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ title: "", rationale: "", tags: "" });
 
-  const filtered = filter === "all" ? data.decisions : data.decisions.filter(d => d.tags.includes(filter));
+  const list = useMemo(() => decisions ?? [], [decisions]);
 
-  const counts: Record<string, number> = {
-    all: data.decisions.length,
-    arch: data.decisions.filter(d => d.tags.includes("arch")).length,
-    bus: data.decisions.filter(d => d.tags.includes("bus")).length,
-    pv: data.decisions.filter(d => d.tags.includes("pv")).length,
-    bom: data.decisions.filter(d => d.tags.includes("bom")).length,
-    cost: data.decisions.filter(d => d.tags.includes("cost")).length,
-  };
+  const filtered = useMemo(() => {
+    if (filter === "all") return list;
+    return list.filter(d => d.tags.includes(filter));
+  }, [list, filter]);
+
+  const counts: Record<string, number> = useMemo(() => {
+    const out: Record<string, number> = { all: list.length };
+    for (const tag of KNOWN_TAGS) {
+      out[tag] = list.filter(d => d.tags.includes(tag)).length;
+    }
+    return out;
+  }, [list]);
+
+  async function submit() {
+    const title = form.title.trim();
+    const rationale = form.rationale.trim();
+    if (!title || !rationale) return;
+    const tags = form.tags.split(",").map(t => t.trim()).filter(Boolean);
+    await create({ title, rationale, tags });
+    setForm({ title: "", rationale: "", tags: "" });
+    setShowForm(false);
+  }
+
+  if (!decisions) {
+    return (
+      <>
+        <header className="screen-header">
+          <div className="title-block">
+            <div className="crumb">Workspace · Decision Log</div>
+            <h1>Decisions</h1>
+          </div>
+        </header>
+        <div className="body"><div style={{ padding: 40, color: "var(--text-muted)" }}>Loading…</div></div>
+      </>
+    );
+  }
 
   return (
     <>
       <header className="screen-header">
         <div className="title-block">
           <div className="crumb">Workspace · Decision Log</div>
-          <h1>Decisions <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-faint)", marginLeft: 8 }}>{data.decisions.length} entries · newest first</span></h1>
+          <h1>
+            Decisions{" "}
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-faint)", marginLeft: 8 }}>
+              {list.length} entries · newest first
+            </span>
+          </h1>
         </div>
         <div className="actions">
-          <button className="btn ghost sm"><Icons.Filter /><span>Filter</span></button>
-          <button className="btn sm"><Icons.Download /><span>Export .md</span></button>
-          <button className="btn primary sm"><Icons.Plus /><span>Log decision</span></button>
+          <button className="btn primary sm" onClick={() => setShowForm(s => !s)}>
+            <Icons.Plus /><span>Log decision</span>
+          </button>
         </div>
       </header>
 
       <div style={{ padding: "16px 32px 0", display: "flex", gap: 6, flexWrap: "wrap", borderBottom: "1px solid var(--line)" }}>
-        {[
-          ["all", "All"], ["arch", "Arch"], ["bus", "Bus"], ["pv", "PV / MPPT"],
-          ["bom", "BOM"], ["cost", "Cost"]
-        ].map(([k, label]) => (
+        <button
+          className={"chip" + (filter === "all" ? " active" : "")}
+          onClick={() => setFilter("all")}
+          style={{ marginBottom: 12 }}
+        >
+          All <span style={{ opacity: 0.5, marginLeft: 4 }}>{counts.all}</span>
+        </button>
+        {KNOWN_TAGS.map(tag => (
           <button
-            key={k}
-            className={"chip" + (filter === k ? " active" : "")}
-            onClick={() => setFilter(k)}
+            key={tag}
+            className={"chip" + (filter === tag ? " active" : "")}
+            onClick={() => setFilter(tag)}
             style={{ marginBottom: 12 }}
           >
-            {label} <span style={{ opacity: 0.5, marginLeft: 4 }}>{counts[k] ?? 0}</span>
+            {tag.toUpperCase()} <span style={{ opacity: 0.5, marginLeft: 4 }}>{counts[tag] ?? 0}</span>
           </button>
         ))}
       </div>
 
       <div className="body">
+        {showForm && (
+          <div className="card" style={{ marginBottom: 16, padding: 16 }}>
+            <h3 style={{ marginTop: 0 }}>New decision</h3>
+            <div style={{ display: "grid", gap: 8 }}>
+              <input
+                className="input"
+                placeholder="Title"
+                value={form.title}
+                onChange={e => setForm({ ...form, title: e.target.value })}
+              />
+              <textarea
+                className="input"
+                placeholder="Rationale — why are we doing this?"
+                value={form.rationale}
+                onChange={e => setForm({ ...form, rationale: e.target.value })}
+                style={{ minHeight: 80, resize: "vertical" }}
+              />
+              <input
+                className="input"
+                placeholder="Tags (comma separated, e.g. bus, cost)"
+                value={form.tags}
+                onChange={e => setForm({ ...form, tags: e.target.value })}
+              />
+              <div style={{ display: "flex", gap: 6 }}>
+                <button className="btn primary sm" onClick={submit}>Save</button>
+                <button className="btn ghost sm" onClick={() => setShowForm(false)}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="decision-list">
           {filtered.map(d => (
-            <div className="decision" key={d.id}>
+            <div className="decision" key={d._id}>
               <div className="left">
-                <span className="date">{d.date}</span>
-                <span className="id">{d.id}</span>
+                <span className="date">{new Date(d.createdAt).toISOString().slice(0, 10)}</span>
+                <span className="id">{d.decisionId}</span>
               </div>
               <div className="right">
                 <div className="title">{d.title}</div>
-                <div className="why">{d.why}</div>
+                <div className="why">{d.rationale}</div>
                 <div className="tags">
                   {d.tags.map(t => <span key={t} className={"tag " + t}>{t}</span>)}
                 </div>
@@ -71,7 +143,9 @@ export default function Decisions({ data }: DecisionsProps) {
           ))}
           {filtered.length === 0 && (
             <div style={{ textAlign: "center", padding: "60px 0", color: "var(--text-muted)" }}>
-              No decisions match this filter.
+              {list.length === 0
+                ? "No decisions logged yet. Log one above, or ask the assistant in chat."
+                : "No decisions match this filter."}
             </div>
           )}
         </div>

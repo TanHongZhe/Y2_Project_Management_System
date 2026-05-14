@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { APP_DATA } from '@/lib/data';
 import Sidebar from './Sidebar';
 import Overview from './screens/Overview';
 import Chat from './screens/Chat';
@@ -58,22 +57,20 @@ export default function App() {
     document.documentElement.dataset.surface = tweaks.surface;
   }, [tweaks]);
 
-  const data = APP_DATA;
-
   let screen: React.ReactNode = null;
-  if (route === "overview")       screen = <Overview data={data} setRoute={setRoute} />;
-  else if (route === "chat")      screen = <Chat data={data} tweaks={tweaks} setRoute={setRoute} />;
-  else if (route === "memory")    screen = <Memory data={data} />;
-  else if (route === "decisions") screen = <Decisions data={data} />;
-  else if (route === "components") screen = <Components data={data} />;
-  else if (route === "tests")     screen = <Tests data={data} />;
-  else if (route === "docs")      screen = <Docs data={data} />;
-  else if (route === "settings")  screen = <Settings data={data} tweaks={tweaks} setTweak={setTweak} />;
+  if (route === "overview")       screen = <Overview setRoute={setRoute} />;
+  else if (route === "chat")      screen = <Chat tweaks={tweaks} setRoute={setRoute} />;
+  else if (route === "memory")    screen = <Memory />;
+  else if (route === "decisions") screen = <Decisions />;
+  else if (route === "components") screen = <Components />;
+  else if (route === "tests")     screen = <Tests />;
+  else if (route === "docs")      screen = <Docs />;
+  else if (route === "settings")  screen = <Settings tweaks={tweaks} setTweak={setTweak} />;
   else if (route === "empty")     screen = <Empty setRoute={setRoute} />;
 
   return (
     <div className="app">
-      <Sidebar route={route} setRoute={setRoute} data={data} />
+      <Sidebar route={route} setRoute={setRoute} />
       <main className="main" data-screen-label={ROUTE_LABELS[route] ?? route}>
         {screen}
       </main>

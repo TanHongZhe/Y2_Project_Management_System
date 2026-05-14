@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { AppData } from '@/lib/data';
+import { useQuery, useMutation } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
+import { Id, Doc } from '../../../convex/_generated/dataModel';
 import { MODELS } from '@/lib/models';
 import { renderMarkdown } from '@/lib/markdown';
 import * as Icons from '../Icons';
@@ -16,80 +18,87 @@ interface Tweaks {
 }
 
 interface ChatProps {
-  data: AppData;
   tweaks: Tweaks;
   setRoute: (r: string) => void;
 }
 
-interface Citation {
-  n: number;
-  file: string;
-  section: string;
-}
-
-interface ToolCall {
+interface StreamingTool {
+  id: string;
   name: string;
   args: string;
-  diff: string;
-  status: string;
+  status: "pending" | "applied" | "error";
+  result?: string;
 }
 
-interface MessageData {
-  role: "user" | "ai";
-  who: "you" | "ai";
+interface PendingAssistant {
+  content: string;
+  citations: Array<{ file: string; section?: string; url?: string }>;
+  toolCalls: StreamingTool[];
+}
+
+function MessageBubble({
+  role,
+  content,
+  model,
+  toolCalls,
+  citations,
+  streaming,
+}: {
+  role: "user" | "assistant" | "system";
+  content: string;
   model?: string | null;
-  ts: string;
-  boost?: boolean;
+  toolCalls?: Array<{
+    name: string;
+    args: string;
+    status: "pending" | "applied" | "error";
+    result?: string;
+  }>;
+  citations?: Array<{ file: string; section?: string; url?: string }>;
   streaming?: boolean;
-  toolCall?: ToolCall | null;
-  streamText?: string;
-  citations?: Citation[];
-  content?: React.ReactNode;
-}
-
-function Message({ m }: { m: MessageData }) {
-  const isUser = m.role === "user";
+}) {
+  const isUser = role === "user";
   return (
     <div className="msg-row">
       <div className={"msg-avatar " + (isUser ? "user" : "ai")}>{isUser ? "ME" : "AI"}</div>
       <div className="msg-body">
         <div className="msg-meta">
           <span className="role">{isUser ? "You" : "Assistant"}</span>
-          {m.model && (
-            <span className={"model-tag" + (m.boost ? " boost" : "")}>
-              {m.boost && <Icons.Bolt size={9} />}
-              {m.model}
-            </span>
-          )}
-          <span>{m.ts}</span>
+          {model && <span className="model-tag">{model}</span>}
         </div>
-        <div className="msg-content">
-          {m.streamText
-            ? renderMarkdown(m.streamText, m.streaming)
-            : m.content}
-        </div>
+        <div className="msg-content">{renderMarkdown(content, streaming)}</div>
 
-        {m.toolCall && (
-          <div className="tool-call">
-            <div className="head">
-              <Icons.Branch size={12} />
-              <span className="name">{m.toolCall.name}</span>
-              <span style={{ color: "var(--text-faint)" }}>({m.toolCall.args})</span>
-              <span className="status"><span className="dot" /> applied</span>
-            </div>
-            <div className="body-tc">
-              <span className="k">+ </span><span className="added">{m.toolCall.diff}</span>
-            </div>
+        {toolCalls && toolCalls.length > 0 && (
+          <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+            {toolCalls.map((tc, i) => (
+              <div className="tool-call" key={i}>
+                <div className="head">
+                  <Icons.Branch size={12} />
+                  <span className="name">{tc.name}</span>
+                  <span style={{ color: "var(--text-faint)" }}>
+                    ({summariseArgs(tc.args)})
+                  </span>
+                  <span className="status">
+                    <span className="dot" style={{ background: tc.status === "applied" ? "var(--accent)" : tc.status === "error" ? "#c66" : "var(--text-faint)" }} />
+                    {tc.status}
+                  </span>
+                </div>
+                {tc.result && (
+                  <div className="body-tc">
+                    <span className="added">{tc.result}</span>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
 
-        {m.citations && m.citations.length > 0 && (
+        {citations && citations.length > 0 && (
           <div className="citations">
-            {m.citations.map(c => (
-              <span className="citation-chip" key={c.n} title="Click to open source">
-                <span className="num">{c.n}</span>
+            {citations.map((c, i) => (
+              <span className="citation-chip" key={i} title={c.url ?? c.file}>
+                <span className="num">{i + 1}</span>
                 <span>{c.file}</span>
-                <span style={{ color: "var(--text-faint)" }}>· {c.section}</span>
+                {c.section && <span style={{ color: "var(--text-faint)" }}>· {c.section}</span>}
               </span>
             ))}
           </div>
@@ -99,51 +108,56 @@ function Message({ m }: { m: MessageData }) {
   );
 }
 
-export default function Chat({ data, tweaks, setRoute }: ChatProps) {
+function summariseArgs(rawArgs: string): string {
+  try {
+    const parsed = JSON.parse(rawArgs);
+    if (parsed && typeof parsed === "object") {
+      if ("title" in parsed) return String(parsed.title).slice(0, 60);
+      if ("section" in parsed) return `section: ${parsed.section}`;
+      if ("name" in parsed) return String(parsed.name).slice(0, 60);
+    }
+    return rawArgs.slice(0, 80);
+  } catch {
+    return rawArgs.slice(0, 80);
+  }
+}
+
+export default function Chat({ tweaks, setRoute: _setRoute }: ChatProps) {
+  void _setRoute;
+  const threads = useQuery(api.threads.list, { limit: 30 });
+  const createThread = useMutation(api.threads.create);
+  const removeThread = useMutation(api.threads.remove);
+
+  const [selectedThreadId, setSelectedThreadId] = useState<Id<"threads"> | null>(null);
+  const threadId = selectedThreadId ?? threads?.[0]?._id ?? null;
+
+  const messages = useQuery(api.messages.listByThread, threadId ? { threadId } : "skip");
+
   const [boost, setBoost] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const [railTab, setRailTab] = useState("memory");
   const [draft, setDraft] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [streamText, setStreamText] = useState("");
+  const [pending, setPending] = useState<PendingAssistant | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const seedMessages = useMemo<MessageData[]>(() => ([
-    {
-      role: "user", who: "you", model: null, ts: "11:38",
-      content: <p>What ripple should I expect on the 3.30 V rail once the LED PWM is on, and is the current bulk cap big enough?</p>,
-    },
-    {
-      role: "ai", who: "ai", model: "gemini-flash", ts: "11:38", boost: false,
-      content: (
-        <>
-          <p>Short answer: with the present 47 µF X7R output cap and PWM at 1 kHz, expect injected ripple in the <strong>80–110 mVpp</strong> range during transitions, which is over your <code>50 mVpp</code> target.</p>
-          <p>Here&apos;s why, working from what&apos;s in memory:</p>
-          <ul>
-            <li>From <code>Bus Voltage</code>, switch frequency is <strong>500 kHz</strong> and you&apos;re using a 47 µF output cap.</li>
-            <li>From test <strong>T-017</strong> you already measured <strong>95 mVpp</strong> with PWM at 50% duty — that matches the back-of-envelope figure for switching the 8 × 20 mA LED string through U3.</li>
-            <li>U2 (TPS63802) loop bandwidth is ~30 kHz, so it cannot reject a 1 kHz square-edge disturbance from a downstream stage as fast as the cap can.</li>
-          </ul>
-          <p>Two cheap fixes that fit your BOM budget:</p>
-          <ol>
-            <li>Add a parallel <strong>22 µF X7R + 100 nF</strong> on the 3.30 V rail right at U3&apos;s input — same footprint family you already have. Should knock ripple down to ~40 mVpp.</li>
-            <li>Slow U3&apos;s gate drive by adding a 22 Ω in series with each LED — costs you ~1.5% efficiency but removes the spike pair entirely.</li>
-          </ol>
-          <p>Option 1 is the one I&apos;d log. Want me to add it as a decision and bump C-07 budget by ~£0.40?</p>
-        </>
-      ),
-      citations: [
-        { n: 1, file: "project_memory.md", section: "Bus Voltage" },
-        { n: 2, file: "tests.json", section: "T-017 — Ripple under LED PWM" },
-        { n: 3, file: "tps63802.pdf", section: "p.14 — Loop response" },
-      ],
-    },
-    {
-      role: "user", who: "you", model: null, ts: "11:41",
-      content: <p>Yes, log it as decision and add a 22 µF cap to components.</p>,
-    },
-  ]), []);
+  const memoryNotes = useQuery(api.memoryNotes.list, {});
+  const recentDecisions = useQuery(api.decisions.list, { limit: 5 });
+  const recentDocs = useQuery(api.documents.list, { limit: 8 });
+
+  async function newThread() {
+    const id = await createThread({ title: "New session" });
+    setSelectedThreadId(id as Id<"threads">);
+    setPending(null);
+  }
+
+  async function deleteCurrent() {
+    if (!threadId) return;
+    await removeThread({ threadId });
+    setSelectedThreadId(null);
+    setPending(null);
+  }
 
   async function handleSend() {
     const userText = draft.trim();
@@ -151,8 +165,20 @@ export default function Chat({ data, tweaks, setRoute }: ChatProps) {
     setDraft("");
     if (taRef.current) taRef.current.style.height = "auto";
 
+    let activeThreadId = threadId;
+    if (!activeThreadId) {
+      activeThreadId = (await createThread({ title: userText.slice(0, 60) })) as Id<"threads">;
+      setSelectedThreadId(activeThreadId);
+    }
+
     setStreaming(true);
-    setStreamText("");
+    setPending({ content: "", citations: [], toolCalls: [] });
+
+    const apiMessages: Array<{ role: "user" | "assistant" | "system"; content: string }> = (messages ?? []).map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+    apiMessages.push({ role: "user", content: userText });
 
     try {
       const res = await fetch("/api/chat", {
@@ -160,21 +186,18 @@ export default function Chat({ data, tweaks, setRoute }: ChatProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: boost ? "boost" : "flash",
-          stream: true,
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a hardware-project copilot for the Y2 Solar Bus Demonstrator. Use project memory as ground truth. Be concise and engineering-accurate.",
-            },
-            { role: "user", content: userText },
-          ],
+          threadId: activeThreadId,
+          messages: apiMessages,
         }),
       });
 
       if (!res.ok || !res.body) {
         const detail = await res.text().catch(() => "");
-        setStreamText(`⚠️ Request failed (${res.status}). ${detail.slice(0, 240)}`);
+        setPending({
+          content: `⚠️ Request failed (${res.status}). ${detail.slice(0, 240)}`,
+          citations: [],
+          toolCalls: [],
+        });
         setStreaming(false);
         return;
       }
@@ -182,13 +205,11 @@ export default function Chat({ data, tweaks, setRoute }: ChatProps) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let acc = "";
 
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
 
@@ -196,29 +217,55 @@ export default function Chat({ data, tweaks, setRoute }: ChatProps) {
           const line = raw.trim();
           if (!line.startsWith("data:")) continue;
           const payload = line.slice(5).trim();
-          if (!payload || payload === "[DONE]") continue;
+          if (!payload) continue;
+          let evt: unknown;
           try {
-            const json = JSON.parse(payload);
-            const delta = json?.choices?.[0]?.delta?.content;
-            if (typeof delta === "string" && delta.length > 0) {
-              acc += delta;
-              setStreamText(acc);
-            }
+            evt = JSON.parse(payload);
           } catch {
-            // ignore keep-alive / partial chunks
+            continue;
+          }
+          if (typeof evt !== "object" || evt === null) continue;
+          const obj = evt as Record<string, unknown>;
+          const type = obj.type;
+          if (type === "content" && typeof obj.delta === "string") {
+            const delta = obj.delta;
+            setPending(prev => prev ? { ...prev, content: prev.content + delta } : prev);
+          } else if (type === "citations" && Array.isArray(obj.citations)) {
+            const citations = obj.citations as Array<{ file: string; section?: string; url?: string }>;
+            setPending(prev => prev ? { ...prev, citations } : prev);
+          } else if (type === "tool_call") {
+            const toolCall: StreamingTool = {
+              id: String(obj.id ?? ""),
+              name: String(obj.name ?? ""),
+              args: String(obj.args ?? ""),
+              status: (obj.status === "applied" || obj.status === "error" ? obj.status : "pending") as StreamingTool["status"],
+              result: typeof obj.result === "string" ? obj.result : undefined,
+            };
+            setPending(prev => {
+              if (!prev) return prev;
+              const exists = prev.toolCalls.find(t => t.id === toolCall.id);
+              const toolCalls = exists
+                ? prev.toolCalls.map(t => t.id === toolCall.id ? toolCall : t)
+                : [...prev.toolCalls, toolCall];
+              return { ...prev, toolCalls };
+            });
+          } else if (type === "done") {
+            // server has saved assistant message; clear local pending on next tick once Convex query refreshes
           }
         }
       }
     } catch (err) {
-      setStreamText(`⚠️ ${err instanceof Error ? err.message : "Network error"}`);
+      const msg = err instanceof Error ? err.message : "Network error";
+      setPending(prev => prev ? { ...prev, content: prev.content + `\n\n⚠️ ${msg}` } : { content: `⚠️ ${msg}`, citations: [], toolCalls: [] });
     } finally {
       setStreaming(false);
+      setTimeout(() => setPending(null), 600);
     }
   }
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [streamText, streaming]);
+  }, [pending, messages, streaming]);
 
   function onKey(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -234,30 +281,31 @@ export default function Chat({ data, tweaks, setRoute }: ChatProps) {
     el.style.height = Math.min(200, el.scrollHeight) + "px";
   }
 
-  const streamMsg: MessageData = {
-    role: "ai", who: "ai",
-    model: boost ? MODELS.boost.id : MODELS.flash.id,
-    ts: "now",
-    boost,
-    streaming,
-    streamText,
-    citations: [],
-  };
+  const currentThread = useMemo(
+    () => threads?.find(t => t._id === threadId) ?? null,
+    [threads, threadId],
+  );
 
   return (
     <>
       <header className="screen-header">
         <div className="title-block">
           <div className="crumb">Workspace · Chat</div>
-          <h1>Project memory session</h1>
+          <h1>{currentThread?.title ?? "New session"}</h1>
         </div>
         <div className="actions">
           <button className={"btn ghost sm" + (showDebug ? " primary" : "")} onClick={() => setShowDebug(s => !s)}>
             {showDebug ? <Icons.EyeOff /> : <Icons.Eye />}
             <span>Show context</span>
           </button>
-          <button className="btn ghost icon-only" title="Restart conversation"><Icons.Restart /></button>
-          <button className="btn sm"><Icons.Download /><span>Export</span></button>
+          <button className="btn ghost icon-only" title="New thread" onClick={() => void newThread()}>
+            <Icons.Plus />
+          </button>
+          {threadId && (
+            <button className="btn ghost icon-only" title="Delete thread" onClick={() => void deleteCurrent()}>
+              <Icons.Trash />
+            </button>
+          )}
         </div>
       </header>
 
@@ -266,23 +314,48 @@ export default function Chat({ data, tweaks, setRoute }: ChatProps) {
           <div className="chat-scroll" ref={scrollRef}>
             {showDebug && (
               <div className="debug-pane">
-                <div><span className="lbl">Sent to model</span></div>
+                <div><span className="lbl">RAG context wired</span></div>
                 <div style={{ marginTop: 6 }}>
-                  <span className="hl">system</span>: You are a hardware-project copilot. Use project_memory.md as ground truth.{" "}
-                  <span className="hl">tools</span>: update_memory(section, content), add_component(...), log_decision(...), log_test_result(...){" "}
-                  <span className="hl">context_bytes</span>: 38_412 / 1_048_576 (3.7%){" "}
-                  <span className="hl">files_attached</span>: project_memory.md, components.json, decisions.json, tests.json, README.md, schematic-rev3.pdf
+                  <span className="hl">system</span>: project copilot, tool calling enabled.{" "}
+                  <span className="hl">tools</span>: log_decision, add_component, update_memory, log_test_result{" "}
+                  <span className="hl">retrieval</span>: top-8 vector search over chunks + pinned memory + last 5 decisions{" "}
+                  <span className="hl">model</span>: {boost ? MODELS.boost.id : MODELS.flash.id}
                 </div>
               </div>
             )}
 
             <div className="chat-thread">
-              {seedMessages.map((m, i) => (
-                <Message key={i} m={m} />
+              {messages && messages.length === 0 && !pending && (
+                <div style={{ padding: "40px 20px", color: "var(--text-muted)", textAlign: "center" }}>
+                  Start by asking a question or telling the assistant what you decided, measured, or learned.
+                </div>
+              )}
+
+              {messages?.map((m: Doc<"messages">) => (
+                <MessageBubble
+                  key={m._id}
+                  role={m.role}
+                  content={m.content}
+                  model={m.model}
+                  toolCalls={m.toolCalls?.map(tc => ({
+                    name: tc.name,
+                    args: tc.args,
+                    status: tc.status,
+                    result: tc.result,
+                  }))}
+                  citations={m.citations}
+                />
               ))}
 
-              {(streaming || streamText) && (
-                <Message m={streamMsg} />
+              {pending && (
+                <MessageBubble
+                  role="assistant"
+                  content={pending.content || (streaming ? "…" : "")}
+                  model={boost ? MODELS.boost.id : MODELS.flash.id}
+                  toolCalls={pending.toolCalls}
+                  citations={pending.citations}
+                  streaming={streaming}
+                />
               )}
             </div>
           </div>
@@ -300,10 +373,10 @@ export default function Chat({ data, tweaks, setRoute }: ChatProps) {
                 <div className="left">
                   <div className="model-picker">
                     <button className={!boost ? "active" : ""} onClick={() => setBoost(false)} title={MODELS.flash.id}>
-                      <span>{MODELS.flash.label}</span><span className="price">mimo-v2</span>
+                      <span>{MODELS.flash.label}</span><span className="price">{MODELS.flash.id.split("/")[1]?.slice(0, 10) ?? ""}</span>
                     </button>
                     <button className={"boost " + (boost ? "active" : "")} onClick={() => setBoost(true)} title={MODELS.boost.id}>
-                      <Icons.Bolt size={11} /><span>{MODELS.boost.label}</span><span className="price">gpt-5.4</span>
+                      <Icons.Bolt size={11} /><span>{MODELS.boost.label}</span><span className="price">{MODELS.boost.id.split("/")[1]?.slice(0, 10) ?? ""}</span>
                     </button>
                   </div>
                 </div>
@@ -311,7 +384,7 @@ export default function Chat({ data, tweaks, setRoute }: ChatProps) {
                   <span className="hint"><span className="kbd">⏎</span> send · <span className="kbd">⇧⏎</span> newline</span>
                   <button className="btn primary sm" onClick={() => void handleSend()} disabled={!draft.trim() || streaming}>
                     <Icons.Send size={12} />
-                    <span>Send</span>
+                    <span>{streaming ? "…" : "Send"}</span>
                   </button>
                 </div>
               </div>
@@ -323,58 +396,78 @@ export default function Chat({ data, tweaks, setRoute }: ChatProps) {
           <aside className="chat-rail">
             <div className="rail-tabs">
               <button className={railTab === "memory" ? "active" : ""} onClick={() => setRailTab("memory")}>Memory</button>
-              <button className={railTab === "activity" ? "active" : ""} onClick={() => setRailTab("activity")}>Activity</button>
+              <button className={railTab === "threads" ? "active" : ""} onClick={() => setRailTab("threads")}>Threads</button>
               <button className={railTab === "sources" ? "active" : ""} onClick={() => setRailTab("sources")}>Sources</button>
             </div>
             <div className="rail-scroll">
               {railTab === "memory" && (
                 <>
                   <div className="rail-section">
-                    <h4>Pinned <span className="badge">3</span></h4>
-                    <div className="item">
-                      Bus target <code>3.30 V ± 2%</code>, ripple ≤ 50 mVpp
-                      <span className="ts">memory · Bus Voltage</span>
-                    </div>
-                    <div className="item">
-                      MPPT: P&amp;O, step 50 mV / 200 ms
-                      <span className="ts">memory · SMPS Roles</span>
-                    </div>
-                    <div className="item">
-                      LED driver kept separate from bus regulator (D-007)
-                      <span className="ts">decision · 2026-04-28</span>
-                    </div>
+                    <h4>Pinned <span className="badge">{memoryNotes?.length ?? 0}</span></h4>
+                    {(!memoryNotes || memoryNotes.length === 0) && (
+                      <div className="item" style={{ color: "var(--text-faint)" }}>
+                        No memory notes yet.
+                      </div>
+                    )}
+                    {memoryNotes?.slice(0, 6).map(n => (
+                      <div className="item" key={n._id}>
+                        {n.content.slice(0, 120) || <em style={{ color: "var(--text-faint)" }}>empty</em>}
+                        <span className="ts">memory · {n.section}</span>
+                      </div>
+                    ))}
                   </div>
                   <div className="rail-section">
-                    <h4>Open questions</h4>
-                    <div className="item">Q-001 — Share buck-boost clock with MCU?</div>
-                    <div className="item">Q-002 — Is the bleed resistor necessary?</div>
-                    <div className="item">Q-003 — STM32 I²C locks during PWM ISR</div>
-                  </div>
-                  <div className="rail-section">
-                    <h4>Recent tests</h4>
-                    <div className="item">T-021 — MPPT sweep: 6.20 V / 0.42 A<span className="ts">2026-05-13</span></div>
-                    <div className="item">T-020 — Charge 1.0 V → 4.8 V in 14:28<span className="ts">2026-05-12</span></div>
-                    <div className="item">T-019 — Bus regulation, ΔV −38 mV @ 1 A<span className="ts">2026-05-10</span></div>
+                    <h4>Recent decisions</h4>
+                    {(!recentDecisions || recentDecisions.length === 0) && (
+                      <div className="item" style={{ color: "var(--text-faint)" }}>None yet.</div>
+                    )}
+                    {recentDecisions?.slice(0, 5).map(d => (
+                      <div className="item" key={d._id}>
+                        {d.title}
+                        <span className="ts">{d.decisionId} · {new Date(d.createdAt).toISOString().slice(0, 10)}</span>
+                      </div>
+                    ))}
                   </div>
                 </>
               )}
-              {railTab === "activity" && (
+              {railTab === "threads" && (
                 <div className="rail-section">
-                  <h4>This session</h4>
-                  {data.recentMemoryActivity.map((a, i) => (
-                    <div className="item" key={i}>
-                      {a.what}
-                      <span className="ts">{a.ts} · {a.who === "ai" ? "AI" : "you"}</span>
+                  <h4>Sessions</h4>
+                  {(!threads || threads.length === 0) && (
+                    <div className="item" style={{ color: "var(--text-faint)" }}>No sessions yet.</div>
+                  )}
+                  {threads?.map(t => (
+                    <div
+                      key={t._id}
+                      className="item"
+                      onClick={() => setSelectedThreadId(t._id)}
+                      style={{
+                        cursor: "pointer",
+                        background: threadId === t._id ? "var(--bg-elev)" : undefined,
+                      }}
+                    >
+                      {t.title}
+                      <span className="ts">{new Date(t.lastMessageAt ?? t.createdAt).toISOString().slice(0, 10)}</span>
                     </div>
                   ))}
                 </div>
               )}
               {railTab === "sources" && (
                 <div className="rail-section">
-                  <h4>Cited this turn</h4>
-                  <div className="item"><code>project_memory.md</code> · Bus Voltage<span className="ts">cited × 2</span></div>
-                  <div className="item"><code>tests.json</code> · T-017<span className="ts">cited × 1</span></div>
-                  <div className="item"><code>tps63802.pdf</code> · p. 14<span className="ts">cited × 1</span></div>
+                  <h4>Ingested docs</h4>
+                  {(!recentDocs || recentDocs.length === 0) && (
+                    <div className="item" style={{ color: "var(--text-faint)" }}>
+                      Upload some files in the Docs tab.
+                    </div>
+                  )}
+                  {recentDocs?.map(d => (
+                    <div className="item" key={d._id}>
+                      <code>{d.name}</code>
+                      <span className="ts">
+                        {d.status} · {d.chunkCount ?? 0} chunk{d.chunkCount === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

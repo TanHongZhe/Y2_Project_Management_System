@@ -43,6 +43,9 @@ next-env.d.ts
 # convex
 .convex/
 
+# seed corpus (local only — drop files here for scripts/ingest.ts)
+/seed/
+
 # cloudflare / opennext
 .open-next/
 .wrangler/
