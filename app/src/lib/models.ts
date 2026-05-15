@@ -1,11 +1,11 @@
 export const MODELS = {
   flash: {
-    id: "google/gemma-4-31b-it",
+    id: "xiaomi/mimo-v2.5",
     label: "Flash",
     blurb: "Fast, cheap default.",
   },
   boost: {
-    id: "openai/gpt-5.4-nano",
+    id: "anthropic/claude-sonnet-4.6",
     label: "Boost",
     blurb: "Higher-quality reasoning.",
   },

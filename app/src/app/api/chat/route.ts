@@ -494,26 +494,41 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-      "HTTP-Referer":
-        process.env.OPENROUTER_SITE_URL ?? "http://localhost:3000",
-      "X-Title": process.env.OPENROUTER_APP_NAME ?? "Y2 PMS",
-    },
-    body: JSON.stringify({
-      model: modelId,
-      messages: upstreamMessages,
-      tools: TOOLS,
-      tool_choice: "auto",
-      stream: true,
-      stream_options: { include_usage: true },
-      temperature,
-      max_tokens: maxTokens,
-    }),
-  });
+  const fallbackId = isBoost ? MODELS.flash.id : MODELS.boost.id;
+
+  async function callOR(mid: string) {
+    return fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "HTTP-Referer": process.env.OPENROUTER_SITE_URL ?? "http://localhost:3000",
+        "X-Title": process.env.OPENROUTER_APP_NAME ?? "Y2 PMS",
+      },
+      body: JSON.stringify({
+        model: mid,
+        messages: upstreamMessages,
+        tools: TOOLS,
+        tool_choice: "auto",
+        stream: true,
+        stream_options: { include_usage: true },
+        temperature,
+        max_tokens: maxTokens,
+      }),
+    });
+  }
+
+  let upstream = await callOR(modelId);
+  let isFallback = false;
+
+  if (!upstream.ok) {
+    upstream = await callOR(modelId);
+  }
+
+  if (!upstream.ok) {
+    upstream = await callOR(fallbackId);
+    isFallback = upstream.ok;
+  }
 
   if (!upstream.ok || !upstream.body) {
     const text = await upstream.text().catch(() => "");
@@ -529,6 +544,9 @@ export async function POST(req: NextRequest) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
+        if (isFallback) {
+          controller.enqueue(encoder.encode(sse({ type: "content", delta: `> ⚠️ \`${modelId}\` rate-limited — switched to \`${fallbackId}\`.\n\n` })));
+        }
         if (citations.length > 0) {
           controller.enqueue(encoder.encode(sse({ type: "citations", citations })));
         }
