@@ -20,9 +20,10 @@ interface SettingsProps {
   setTweak: (key: string, value: unknown) => void;
   selectedThreadId: string | null;
   onClearThread: () => void;
+  searchBar?: React.ReactNode;
 }
 
-export default function Settings({ tweaks, setTweak, selectedThreadId }: SettingsProps) {
+export default function Settings({ tweaks, setTweak, selectedThreadId, searchBar }: SettingsProps) {
   const [temp, setTemp] = useState<number>(() => {
     try { return parseInt(localStorage.getItem("pms-temp") ?? "30"); } catch { return 30; }
   });
@@ -119,6 +120,7 @@ export default function Settings({ tweaks, setTweak, selectedThreadId }: Setting
           <h1>Settings</h1>
         </div>
         <div className="actions">
+          {searchBar}
           <button className="btn sm primary" onClick={handleExport} disabled={exporting}>
             <Icons.Download /><span>{exporting ? "Exporting…" : "Export bundle"}</span>
           </button>

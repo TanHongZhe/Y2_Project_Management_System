@@ -1,4 +1,5 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, internalQuery } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 
 export const list = query({
@@ -43,7 +44,18 @@ export const remove = mutation({
 export const setAssignees = mutation({
   args: { id: v.id("todos"), assignedTo: v.array(v.string()) },
   handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.id);
+    const oldSet = new Set(existing?.assignedTo ?? []);
+    const newlyAdded = args.assignedTo.filter((u) => !oldSet.has(u));
+
     await ctx.db.patch(args.id, { assignedTo: args.assignedTo });
+
+    for (const userId of newlyAdded) {
+      await ctx.scheduler.runAfter(0, internal.email.sendAssignedEmail, {
+        todoId: args.id,
+        userId,
+      });
+    }
   },
 });
 
@@ -58,5 +70,36 @@ export const setImportant = mutation({
   args: { id: v.id("todos"), important: v.boolean() },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.id, { important: args.important });
+  },
+});
+
+export const getById = internalQuery({
+  args: { id: v.id("todos") },
+  handler: async (ctx, { id }) => ctx.db.get(id),
+});
+
+export const getDueSoon = internalQuery({
+  args: { from: v.number(), to: v.number() },
+  handler: async (ctx, { from, to }) => {
+    const all = await ctx.db
+      .query("todos")
+      .withIndex("by_createdAt")
+      .collect();
+    return all.filter(
+      (t) => !t.done && t.dueDate !== undefined && t.dueDate >= from && t.dueDate <= to,
+    );
+  },
+});
+
+export const getOverdue = internalQuery({
+  args: { before: v.number() },
+  handler: async (ctx, { before }) => {
+    const all = await ctx.db
+      .query("todos")
+      .withIndex("by_createdAt")
+      .collect();
+    return all.filter(
+      (t) => !t.done && t.dueDate !== undefined && t.dueDate < before,
+    );
   },
 });

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useAction } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import { Doc, Id } from '../../../convex/_generated/dataModel';
@@ -30,7 +30,7 @@ function fmtSize(bytes?: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export default function Docs({ readOnly }: { readOnly?: boolean }) {
+export default function Docs({ readOnly, searchBar, selectedDocId, onDocConsumed }: { readOnly?: boolean; searchBar?: React.ReactNode; selectedDocId?: string; onDocConsumed?: () => void; }) {
   const docs = useQuery(api.documents.list, { limit: 200 });
   const generateUploadUrl = useMutation(api.documents.generateUploadUrl);
   const createDoc = useMutation(api.documents.create);
@@ -42,6 +42,13 @@ export default function Docs({ readOnly }: { readOnly?: boolean }) {
   const [dragOver, setDragOver] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string>("");
   const [, setReindexingId] = useState<Id<"documents"> | null>(null);
+
+  useEffect(() => {
+    if (selectedDocId) {
+      setActive(selectedDocId as Id<"documents">);
+      onDocConsumed?.();
+    }
+  }, [selectedDocId, onDocConsumed]);
 
   const list = useMemo(() => docs ?? [], [docs]);
   const filtered = useMemo(() => {
@@ -111,6 +118,7 @@ export default function Docs({ readOnly }: { readOnly?: boolean }) {
           </h1>
         </div>
         <div className="actions">
+          {searchBar}
           {uploadStatus && (
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-muted)" }}>
               {uploadStatus}
@@ -264,6 +272,76 @@ function ActiveDocView({ doc, onRemove, onReindex, readOnly }: { doc: Doc<"docum
           </button>
         </div>
       )}
+
+      <div style={{ marginTop: 20 }}>
+        <DocPreview doc={doc} />
+      </div>
     </>
   );
+}
+
+function DocPreview({ doc }: { doc: Doc<"documents"> }) {
+  const url = useQuery(api.documents.getUrl, { documentId: doc._id });
+  const [text, setText] = useState<string | null>(null);
+  const [textErr, setTextErr] = useState(false);
+
+  useEffect(() => {
+    setText(null);
+    setTextErr(false);
+    if (!url) return;
+    if (doc.type === "md" || doc.type === "txt" || doc.type === "json") {
+      fetch(url)
+        .then(r => r.text())
+        .then(setText)
+        .catch(() => setTextErr(true));
+    }
+  }, [url, doc.type]);
+
+  if (doc.status !== "ready" && doc.status !== "error") return null;
+  if (!url) return <div style={{ color: "var(--text-faint)", fontSize: 12 }}>Loading preview…</div>;
+
+  if (doc.type === "image") {
+    return (
+      <img
+        src={url}
+        alt={doc.name}
+        style={{ maxWidth: "100%", maxHeight: "65vh", objectFit: "contain", borderRadius: 6, border: "1px solid var(--line)" }}
+      />
+    );
+  }
+
+  if (doc.type === "pdf") {
+    return (
+      <iframe
+        src={url}
+        title={doc.name}
+        style={{ width: "100%", height: "72vh", border: "1px solid var(--line)", borderRadius: 6 }}
+      />
+    );
+  }
+
+  if (doc.type === "md" || doc.type === "txt" || doc.type === "json") {
+    if (textErr) return <div style={{ color: "var(--text-faint)", fontSize: 12 }}>Could not load preview.</div>;
+    if (!text) return <div style={{ color: "var(--text-faint)", fontSize: 12 }}>Loading…</div>;
+    return (
+      <pre style={{
+        fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        lineHeight: 1.6,
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-all",
+        padding: 14,
+        background: "var(--bg)",
+        borderRadius: 6,
+        border: "1px solid var(--line)",
+        maxHeight: "65vh",
+        overflow: "auto",
+        margin: 0,
+      }}>
+        {text}
+      </pre>
+    );
+  }
+
+  return null;
 }

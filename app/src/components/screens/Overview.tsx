@@ -10,6 +10,7 @@ import { USERS, AppUser } from '../../lib/users';
 interface OverviewProps {
   setRoute: (r: string) => void;
   currentUser: AppUser;
+  searchBar?: React.ReactNode;
 }
 
 const PROJECT_NAME = "Solar Bus Demonstrator";
@@ -127,7 +128,7 @@ function AssigneePicker({
   );
 }
 
-export default function Overview({ setRoute, currentUser }: OverviewProps) {
+export default function Overview({ setRoute, currentUser, searchBar }: OverviewProps) {
   const stats = useQuery(api.overview.stats, {});
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const todos = useQuery((api as any).todos.list, {});
@@ -232,6 +233,7 @@ export default function Overview({ setRoute, currentUser }: OverviewProps) {
           <h1>{PROJECT_NAME}</h1>
         </div>
         <div className="actions">
+          {searchBar}
           <button className="btn sm" onClick={() => setRoute("chat")}>
             <Icons.Chat /><span>Continue chat</span>
           </button>

@@ -60,6 +60,7 @@ export default function Sidebar({ route, setRoute, selectedThreadId, onSelectThr
 
   const navItems = [
     { id: "memory",     label: "Project Memory",  Icon: Icons.Memory, count: String(counts.memoryNotes || "") },
+    { id: "meetings",   label: "Meeting Notes",   Icon: Icons.Chat,   count: "" },
     { id: "images",     label: "Images",           Icon: Icons.Image,  count: String((counts as Record<string, number>).images || "") },
     { id: "components", label: "Components",       Icon: Icons.Chip,   count: String(counts.components || "") },
     { id: "tests",      label: "Test Results",     Icon: Icons.Wave,   count: String(counts.tests || "") },
@@ -170,13 +171,13 @@ export default function Sidebar({ route, setRoute, selectedThreadId, onSelectThr
           <div className="budget-card">
             <div className="label">
               <span>Budget</span>
+              <div className="budget-bar"><span style={{ width: `${pct * 100}%` }} /></div>
               <span>{Math.round(pct * 100)}%</span>
             </div>
             <div className="value">
               <span>£{(budget.committed ?? budget.spent).toFixed(2)}</span>
               <span className="of">/ £{budget.cap.toFixed(2)}</span>
             </div>
-            <div className="budget-bar"><span style={{ width: `${pct * 100}%` }} /></div>
           </div>
         )}
 
@@ -194,22 +195,20 @@ export default function Sidebar({ route, setRoute, selectedThreadId, onSelectThr
       </div>
 
       <div className="sidebar-footer">
-        <div
-          className={"nav-item" + (route === "settings" ? " active" : "")}
-          onClick={() => setRoute("settings")}
-          title={collapsed ? "Settings" : undefined}
-        >
-          <Icons.Cog />
-          {!collapsed && <span>Settings</span>}
-        </div>
-
         <div className="sidebar-user-row">
           <SidebarAvatar user={currentUser} />
-          {!collapsed && <span className="sidebar-user-name">{currentUser.name}</span>}
+          {!collapsed && (
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span className="sidebar-user-name">{currentUser.name}</span>
+              <div className="sidebar-status-line">
+                <span className="dot" /><span>Connected · v0.4.0</span>
+              </div>
+            </div>
+          )}
           {!collapsed && (
             <button
               className="btn ghost icon-only"
-              style={{ width: 24, height: 24, padding: 0, marginLeft: "auto", flexShrink: 0 }}
+              style={{ width: 24, height: 24, padding: 0, flexShrink: 0 }}
               title="Switch user"
               onClick={onSwitchUser}
             >
@@ -218,12 +217,14 @@ export default function Sidebar({ route, setRoute, selectedThreadId, onSelectThr
           )}
         </div>
 
-        {!collapsed && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 12px 4px" }}>
-            <span className="status-pill"><span className="dot" />Connected</span>
-            <span className="status-pill" style={{ color: "var(--text-faint)" }}>v0.4.0</span>
-          </div>
-        )}
+        <div
+          className={"nav-item" + (route === "settings" ? " active" : "")}
+          onClick={() => setRoute("settings")}
+          title={collapsed ? "Settings" : undefined}
+        >
+          <Icons.Cog />
+          {!collapsed && <span>Settings</span>}
+        </div>
       </div>
     </aside>
   );

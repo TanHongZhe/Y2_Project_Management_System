@@ -25,7 +25,7 @@ function SortableTh({
 
 interface EditForm { name: string; qty: string; estCost: string; totalCost: string; supplier: string; model: string; }
 
-export default function Components({ readOnly }: { readOnly?: boolean }) {
+export default function Components({ readOnly, searchBar }: { readOnly?: boolean; searchBar?: React.ReactNode }) {
   const components = useQuery(api.components.list, { limit: 500 });
   const stats = useQuery(api.overview.stats, {});
   const create = useMutation(api.components.create);
@@ -257,13 +257,14 @@ export default function Components({ readOnly }: { readOnly?: boolean }) {
             </span>
           </h1>
         </div>
-        {!readOnly && (
-          <div className="actions">
+        <div className="actions">
+          {searchBar}
+          {!readOnly && (
             <button className="btn primary sm" onClick={() => setShowForm(s => !s)}>
               <Icons.Plus /><span>Add part</span>
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </header>
 
       <div className="body">

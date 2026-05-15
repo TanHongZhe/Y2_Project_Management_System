@@ -23,6 +23,7 @@ interface ChatProps {
   selectedThreadId: string | null;
   onSelectThread: (id: string | null) => void;
   userId: string;
+  searchBar?: React.ReactNode;
 }
 
 interface StreamingTool {
@@ -82,6 +83,10 @@ function MessageBubble({
 }) {
   const isUser = role === "user";
   const [showSources, setShowSources] = useState(false);
+  const cleanContent = isUser ? content : stripModelArtifacts(content);
+  const visibleToolCalls = (toolCalls ?? []).filter(tc => tc.name !== "ask_clarification");
+  const clarificationOnly = !cleanContent.trim() && visibleToolCalls.length === 0 && (toolCalls ?? []).some(tc => tc.name === "ask_clarification");
+  const displayContent = clarificationOnly ? "I have a few questions before I can make a good recommendation:" : cleanContent;
   return (
     <div className="msg-row">
       <div className={"msg-avatar " + (isUser ? "user" : "ai")}>{isUser ? "ME" : <ModelIcon model={model} />}</div>
@@ -95,30 +100,43 @@ function MessageBubble({
             </span>
           )}
         </div>
-        <div className="msg-content">{renderMarkdown(content, streaming)}</div>
+        <div className="msg-content">{renderMarkdown(displayContent, streaming)}</div>
 
-        {toolCalls && toolCalls.length > 0 && (
+        {visibleToolCalls.length > 0 && (
           <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-            {toolCalls.map((tc, i) => (
-              <div className="tool-call" key={i}>
-                <div className="head">
-                  <Icons.Branch size={12} />
-                  <span className="name">{tc.name}</span>
-                  <span style={{ color: "var(--text-faint)" }}>
-                    ({summariseArgs(tc.args)})
-                  </span>
-                  <span className="status">
-                    <span className="dot" style={{ background: tc.status === "applied" ? "var(--accent)" : tc.status === "error" ? "#c66" : "var(--text-faint)" }} />
-                    {tc.status}
-                  </span>
-                </div>
-                {tc.result && (
-                  <div className="body-tc">
-                    <span className="added">{tc.result}</span>
+            {visibleToolCalls.map((tc, i) => {
+              const isWebSearch = tc.name === "web_search";
+              const isSearching = isWebSearch && tc.status === "pending";
+              return (
+                <div className={"tool-call" + (isSearching ? " searching" : "")} key={i}>
+                  <div className="head">
+                    {isWebSearch ? <Icons.Search size={12} /> : <Icons.Branch size={12} />}
+                    <span className="name">{isWebSearch ? "Web search" : tc.name}</span>
+                    <span style={{ color: "var(--text-faint)" }}>
+                      ({summariseArgs(tc.args)})
+                    </span>
+                    {isSearching ? (
+                      <span className="status searching-status">
+                        <span className="search-dots"><span /><span /><span /></span>
+                        Searching…
+                      </span>
+                    ) : (
+                      <span className="status">
+                        <span className="dot" style={{ background: tc.status === "applied" ? "var(--accent)" : tc.status === "error" ? "#c66" : "var(--text-faint)" }} />
+                        {tc.status}
+                      </span>
+                    )}
                   </div>
-                )}
-              </div>
-            ))}
+                  {tc.result && !isSearching && (
+                    <div className="body-tc">
+                      <span className="added">
+                        {isWebSearch ? summariseWebSearchResult(tc.result) : tc.result}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -155,6 +173,21 @@ function MessageBubble({
   );
 }
 
+function stripModelArtifacts(text: string): string {
+  return text
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
+    .replace(/\[(web_search|ask_clarification|log_decision|add_component|update_memory|log_test_result)[^\]]*\]/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function summariseWebSearchResult(result: string): string {
+  const directMatch = result.match(/\*\*Direct answer:\*\*\s*(.+)/);
+  if (directMatch) return directMatch[1].trim().slice(0, 180);
+  const count = (result.match(/---/g) ?? []).length + 1;
+  return `${count} source${count !== 1 ? "s" : ""} retrieved`;
+}
+
 function summariseArgs(rawArgs: string): string {
   try {
     const parsed = JSON.parse(rawArgs);
@@ -162,11 +195,94 @@ function summariseArgs(rawArgs: string): string {
       if ("title" in parsed) return String(parsed.title).slice(0, 60);
       if ("section" in parsed) return `section: ${parsed.section}`;
       if ("name" in parsed) return String(parsed.name).slice(0, 60);
+      if ("query" in parsed) return `"${String(parsed.query).slice(0, 60)}"`;
+      if ("question" in parsed) return String(parsed.question).slice(0, 60);
     }
     return rawArgs.slice(0, 80);
   } catch {
     return rawArgs.slice(0, 80);
   }
+}
+
+function ClarificationCard({
+  question,
+  options,
+  context,
+  queuePos,
+  queueTotal,
+  onSubmit,
+}: {
+  question: string;
+  options: string[];
+  context?: string;
+  queuePos: number;
+  queueTotal: number;
+  onSubmit: (answer: string) => void;
+}) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const [otherText, setOtherText] = useState("");
+
+  const filteredOptions = options.filter(o => !o.toLowerCase().startsWith("other"));
+  const allOptions = [...filteredOptions, "Decide for me"];
+
+  function handleSubmit() {
+    const answer = selected === "__other__" ? otherText.trim() : selected;
+    if (!answer) return;
+    onSubmit(answer);
+  }
+
+  return (
+    <div className="clarification-card">
+      <div className="cl-header">
+        <Icons.Search size={13} />
+        <span>Need more information</span>
+        {queueTotal > 1 && (
+          <span className="cl-progress">{queuePos} / {queueTotal}</span>
+        )}
+      </div>
+      {context && <div className="cl-context">{context}</div>}
+      <div className="cl-question">{question}</div>
+      <div className="cl-options">
+        {allOptions.map((opt) => (
+          <button
+            key={opt}
+            className={"cl-option" + (selected === opt ? " selected" : "")}
+            onClick={() => setSelected(opt)}
+          >
+            <span className="cl-radio" />
+            {opt}
+          </button>
+        ))}
+        <div className="cl-other-row">
+          <button
+            className={"cl-option cl-other-btn" + (selected === "__other__" ? " selected" : "")}
+            onClick={() => setSelected("__other__")}
+          >
+            <span className="cl-radio" />
+            Other:
+          </button>
+          <input
+            type="text"
+            className="cl-other-input"
+            placeholder="Type your answer…"
+            value={otherText}
+            onChange={e => { setOtherText(e.target.value); setSelected("__other__"); }}
+            onKeyDown={e => { if (e.key === "Enter") handleSubmit(); }}
+          />
+        </div>
+      </div>
+      <div className="cl-footer">
+        <button
+          className="btn primary sm"
+          disabled={!selected || (selected === "__other__" && !otherText.trim())}
+          onClick={handleSubmit}
+        >
+          <Icons.Send size={11} />
+          {queuePos < queueTotal ? "Next question →" : "Submit answer"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 const GUEST_LIMIT = 3;
@@ -189,7 +305,7 @@ function bumpGuestUsage(): void {
   try { localStorage.setItem(GUEST_KEY, JSON.stringify({ count: u.count + 1, resetAt: u.resetAt })); } catch {}
 }
 
-export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, onSelectThread, userId }: ChatProps) {
+export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, onSelectThread, userId, searchBar }: ChatProps) {
   const isGuest = userId === "guest";
   void _setRoute;
   const threads = useQuery(api.threads.list, { limit: 30, userId });
@@ -209,6 +325,9 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
   const [draft, setDraft] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [pending, setPending] = useState<PendingAssistant | null>(null);
+  type ClarificationItem = { id: string; question: string; options: string[]; context?: string };
+  const [clarificationQueue, setClarificationQueue] = useState<ClarificationItem[]>([]);
+  const [clarificationAnswers, setClarificationAnswers] = useState<Array<{ question: string; answer: string }>>([]);
   const [attachedImages, setAttachedImages] = useState<string[]>([]);
   const [attachedFiles, setAttachedFiles] = useState<Array<{ name: string; content: string }>>([]);
   const [fileLoading, setFileLoading] = useState(false);
@@ -221,6 +340,12 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
   useEffect(() => {
     return () => { abortRef.current?.abort(); };
   }, []);
+
+  // Clear pending clarification when switching threads
+  useEffect(() => {
+    setClarificationQueue([]);
+    setClarificationAnswers([]);
+  }, [threadId]);
 
   const memoryNotes = useQuery(api.memoryNotes.list, {});
   const recentDecisions = useQuery(api.decisions.list, { limit: 5 });
@@ -239,8 +364,8 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
     setPending(null);
   }
 
-  async function handleSend() {
-    const userText = draft.trim();
+  async function handleSend(overrideMsg?: string) {
+    const userText = (overrideMsg !== undefined ? overrideMsg : draft).trim();
     if (!userText || streaming || fileLoading) return;
     if (isGuest) {
       const usage = readGuestUsage();
@@ -248,10 +373,14 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
       bumpGuestUsage();
       setGuestUsage(readGuestUsage());
     }
-    setDraft("");
-    if (taRef.current) taRef.current.style.height = "auto";
-    setAttachedImages([]);
-    setAttachedFiles([]);
+    if (!overrideMsg) {
+      setDraft("");
+      if (taRef.current) taRef.current.style.height = "auto";
+      setAttachedImages([]);
+      setAttachedFiles([]);
+      setClarificationQueue([]);
+      setClarificationAnswers([]);
+    }
 
     const isFirstMessage = (messages ?? []).length === 0;
 
@@ -290,13 +419,13 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
       return { role: m.role, content };
     });
 
-    // Build the outgoing user content (text + any attachments)
+    // Build the outgoing user content (text + any attachments; skip attachments for auto-submitted MCQ answers)
     let userContent: ApiContent = userText;
-    if (attachedFiles.length > 0) {
+    if (!overrideMsg && attachedFiles.length > 0) {
       const fileCtx = attachedFiles.map(f => `=== Attached: ${f.name} ===\n${f.content}`).join("\n\n");
       userContent = `${fileCtx}\n\n${userText}`;
     }
-    if (attachedImages.length > 0) {
+    if (!overrideMsg && attachedImages.length > 0) {
       const textPart = typeof userContent === "string" ? userContent : userText;
       const parts: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
         { type: "text", text: textPart },
@@ -388,6 +517,14 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
                 : [...prev.toolCalls, toolCall];
               return { ...prev, toolCalls };
             });
+          } else if (type === "clarification_request") {
+            const item = {
+              id: String(obj.id ?? ""),
+              question: String(obj.question ?? ""),
+              options: Array.isArray(obj.options) ? (obj.options as unknown[]).map(String) : [],
+              context: typeof obj.context === "string" ? obj.context : undefined,
+            };
+            setClarificationQueue(prev => [...prev, item]);
           } else if (type === "error") {
             const msg = String(obj.message ?? "Stream error");
             setPending(prev => prev ? { ...prev, content: prev.content + `\n\n⚠️ ${msg}` } : prev);
@@ -412,6 +549,28 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [pending, messages, streaming]);
+
+  function handleClarificationSubmit(answer: string) {
+    const current = clarificationQueue[0];
+    if (!current) return;
+    const newAnswers = [...clarificationAnswers, { question: current.question, answer }];
+    const remaining = clarificationQueue.slice(1);
+
+    if (remaining.length > 0) {
+      // More questions — advance the queue
+      setClarificationAnswers(newAnswers);
+      setClarificationQueue(remaining);
+    } else {
+      // All questions answered — compile and send in one message
+      setClarificationAnswers([]);
+      setClarificationQueue([]);
+      const compiled =
+        newAnswers.length === 1
+          ? newAnswers[0].answer
+          : `My answers to your questions:\n${newAnswers.map((a, i) => `${i + 1}. ${a.question}: ${a.answer}`).join("\n")}`;
+      void handleSend(compiled);
+    }
+  }
 
   function onKey(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -483,6 +642,7 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
           <h1>{currentThread?.title ?? "New session"}</h1>
         </div>
         <div className="actions">
+          {searchBar}
           <button className={"btn ghost sm" + (showDebug ? " primary" : "")} onClick={() => setShowDebug(s => !s)}>
             {showDebug ? <Icons.EyeOff /> : <Icons.Eye />}
             <span>Show context</span>
@@ -506,7 +666,7 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
                 <div><span className="lbl">RAG context wired</span></div>
                 <div style={{ marginTop: 6 }}>
                   <span className="hl">system</span>: project copilot, tool calling enabled.{" "}
-                  <span className="hl">tools</span>: log_decision, add_component, update_memory, log_test_result{" "}
+                  <span className="hl">tools</span>: log_decision, add_component, update_memory, log_test_result, web_search, ask_clarification{" "}
                   <span className="hl">retrieval</span>: top-8 vector search over chunks + pinned memory + last 5 decisions{" "}
                   <span className="hl">model</span>: {boost ? MODELS.boost.id : MODELS.flash.id}
                 </div>
@@ -545,6 +705,18 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
                   citations={pending.citations}
                   streaming={streaming}
                   usage={pending.usage}
+                />
+              )}
+
+              {clarificationQueue.length > 0 && (
+                <ClarificationCard
+                  key={clarificationQueue[0].id}
+                  question={clarificationQueue[0].question}
+                  options={clarificationQueue[0].options}
+                  context={clarificationQueue[0].context}
+                  queuePos={clarificationAnswers.length + 1}
+                  queueTotal={clarificationAnswers.length + clarificationQueue.length}
+                  onSubmit={handleClarificationSubmit}
                 />
               )}
             </div>

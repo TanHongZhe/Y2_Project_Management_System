@@ -50,7 +50,9 @@ export default defineSchema({
     content: v.string(),
     updatedAt: v.number(),
     author: v.string(),
-  }).index("by_section", ["section"]),
+  })
+    .index("by_section", ["section"])
+    .searchIndex("search_content", { searchField: "content" }),
 
   progressImages: defineTable({
     storageId: v.id("_storage"),
@@ -73,7 +75,8 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_decisionId", ["decisionId"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_createdAt", ["createdAt"])
+    .searchIndex("search_title", { searchField: "title" }),
 
   components: defineTable({
     ref: v.string(),
@@ -96,7 +99,8 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_ref", ["ref"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .searchIndex("search_name", { searchField: "name" }),
 
   tests: defineTable({
     testId: v.string(),
@@ -121,7 +125,26 @@ export default defineSchema({
   })
     .index("by_testId", ["testId"])
     .index("by_subsystem", ["subsystem"])
-    .index("by_testedAt", ["testedAt"]),
+    .index("by_testedAt", ["testedAt"])
+    .searchIndex("search_title", { searchField: "title" }),
+
+  meetingNotes: defineTable({
+    title: v.string(),
+    date: v.number(),
+    attendees: v.array(v.string()),
+    content: v.string(),
+    createdBy: v.string(),
+    updatedAt: v.number(),
+  })
+    .index("by_date", ["date"])
+    .searchIndex("search_content", { searchField: "content" }),
+
+  sentEmails: defineTable({
+    todoId: v.id("todos"),
+    userId: v.string(),
+    type: v.union(v.literal("assigned"), v.literal("due_soon"), v.literal("overdue")),
+    sentAt: v.number(),
+  }).index("by_todo_user_type", ["todoId", "userId", "type"]),
 
   todos: defineTable({
     text: v.string(),

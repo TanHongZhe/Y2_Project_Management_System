@@ -163,9 +163,10 @@ function Lightbox({ images, index, onClose, onNavigate, onUpdateCaption, onDelet
 
 interface ImagesProps {
   currentUser: AppUser;
+  searchBar?: React.ReactNode;
 }
 
-export default function Images({ currentUser }: ImagesProps) {
+export default function Images({ currentUser, searchBar }: ImagesProps) {
   const images = useQuery(api.progressImages.listWithUrls, {});
   const generateUploadUrl = useMutation(api.progressImages.generateUploadUrl);
   const createImage = useMutation(api.progressImages.create);
@@ -250,14 +251,15 @@ export default function Images({ currentUser }: ImagesProps) {
             )}
           </h1>
         </div>
-        {!currentUser.isGuest && (
-          <div className="actions">
+        <div className="actions">
+          {searchBar}
+          {!currentUser.isGuest && (
             <button className="btn primary sm" onClick={() => fileInputRef.current?.click()}>
               <Icons.ArrowUp />
               <span>Upload</span>
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </header>
 
       {!currentUser.isGuest && (

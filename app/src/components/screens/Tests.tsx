@@ -14,7 +14,7 @@ const KNOWN_SUBS = [
   { id: "system", name: "System integration", sub: "end-to-end" },
 ];
 
-export default function Tests({ readOnly }: { readOnly?: boolean }) {
+export default function Tests({ readOnly, searchBar }: { readOnly?: boolean; searchBar?: React.ReactNode }) {
   const tests = useQuery(api.tests.list, { limit: 500 });
   const create = useMutation(api.tests.create);
   const remove = useMutation(api.tests.remove);
@@ -99,13 +99,14 @@ export default function Tests({ readOnly }: { readOnly?: boolean }) {
             </span>
           </h1>
         </div>
-        {!readOnly && (
-          <div className="actions">
+        <div className="actions">
+          {searchBar}
+          {!readOnly && (
             <button className="btn primary sm" onClick={() => setShowForm(s => !s)}>
               <Icons.Plus /><span>New test</span>
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </header>
 
       <div className="tests-grid">

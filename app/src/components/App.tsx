@@ -13,7 +13,9 @@ import Docs from './screens/Docs';
 import Settings from './screens/Settings';
 import Empty from './screens/Empty';
 import Login from './screens/Login';
+import Meetings from './screens/Meetings';
 import CommandPalette from './CommandPalette';
+import GlobalSearch from './GlobalSearch';
 import { AppUser, getSavedUserId, saveUserId, clearUserId, getUserById } from '../lib/users';
 
 interface Tweaks {
@@ -44,6 +46,7 @@ const ROUTE_LABELS: Record<string, string> = {
   docs: "Docs",
   settings: "Settings",
   empty: "New Session",
+  meetings: "Meeting Notes",
 };
 
 function loadTweaks(userId?: string): Tweaks {
@@ -73,6 +76,8 @@ export default function App() {
     try { return localStorage.getItem("pms-sidebar-collapsed") === "true"; } catch { return false; }
   });
   const [cmdOpen, setCmdOpen] = useState(false);
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
+  const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
 
   const handleToggleCollapse = useCallback(() => {
     setSidebarCollapsed(c => {
@@ -150,16 +155,21 @@ export default function App() {
     return <Login onSelect={handleSelectUser} />;
   }
 
+  const handleDocConsumed = useCallback(() => setSelectedDocId(null), []);
+  const handleMeetingConsumed = useCallback(() => setSelectedMeetingId(null), []);
+  const searchBar = <GlobalSearch setRoute={setRoute} onSelectDoc={setSelectedDocId} onSelectMeeting={setSelectedMeetingId} />;
+
   let screen: React.ReactNode = null;
-  if (route === "overview")       screen = <Overview setRoute={setRoute} currentUser={currentUser} />;
-  else if (route === "chat")      screen = <Chat tweaks={tweaks} setRoute={setRoute} selectedThreadId={selectedThreadId} onSelectThread={setSelectedThreadId} userId={currentUser.id} />;
-  else if (route === "memory")    screen = <Memory readOnly={currentUser.isGuest} />;
-  else if (route === "images")    screen = <Images currentUser={currentUser} />;
-  else if (route === "components") screen = <Components readOnly={currentUser.isGuest} />;
-  else if (route === "tests")     screen = <Tests readOnly={currentUser.isGuest} />;
-  else if (route === "docs")      screen = <Docs readOnly={currentUser.isGuest} />;
-  else if (route === "settings")  screen = <Settings tweaks={tweaks} setTweak={setTweak} selectedThreadId={selectedThreadId} onClearThread={handleClearThread} />;
-  else if (route === "empty")     screen = <Empty setRoute={setRoute} />;
+  if (route === "overview")        screen = <Overview setRoute={setRoute} currentUser={currentUser} searchBar={searchBar} />;
+  else if (route === "chat")       screen = <Chat tweaks={tweaks} setRoute={setRoute} selectedThreadId={selectedThreadId} onSelectThread={setSelectedThreadId} userId={currentUser.id} searchBar={searchBar} />;
+  else if (route === "memory")     screen = <Memory readOnly={currentUser.isGuest} searchBar={searchBar} />;
+  else if (route === "images")     screen = <Images currentUser={currentUser} searchBar={searchBar} />;
+  else if (route === "components") screen = <Components readOnly={currentUser.isGuest} searchBar={searchBar} />;
+  else if (route === "tests")      screen = <Tests readOnly={currentUser.isGuest} searchBar={searchBar} />;
+  else if (route === "docs")       screen = <Docs readOnly={currentUser.isGuest} searchBar={searchBar} selectedDocId={selectedDocId ?? undefined} onDocConsumed={handleDocConsumed} />;
+  else if (route === "settings")   screen = <Settings tweaks={tweaks} setTweak={setTweak} selectedThreadId={selectedThreadId} onClearThread={handleClearThread} searchBar={searchBar} />;
+  else if (route === "empty")      screen = <Empty setRoute={setRoute} />;
+  else if (route === "meetings")   screen = <Meetings currentUser={currentUser} readOnly={currentUser.isGuest} searchBar={searchBar} selectedMeetingId={selectedMeetingId ?? undefined} onMeetingConsumed={handleMeetingConsumed} />;
 
   return (
     <div className={"app" + (sidebarCollapsed ? " sidebar-collapsed" : "")}>
@@ -234,7 +244,7 @@ function TweaksPanel({
   const screens = [
     ["overview", "Overview"], ["chat", "Chat"], ["memory", "Memory"],
     ["images", "Images"], ["components", "Components"], ["tests", "Tests"],
-    ["docs", "Docs"], ["settings", "Settings"], ["empty", "Empty"],
+    ["docs", "Docs"], ["meetings", "Meetings"], ["settings", "Settings"], ["empty", "Empty"],
   ];
 
   return (

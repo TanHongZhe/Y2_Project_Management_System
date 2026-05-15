@@ -54,3 +54,9 @@ export const Restart = (p: IconProps) => <Icon {...p}><path d="M3 12a9 9 0 1 0 3
 export const Paperclip = (p: IconProps) => <Icon {...p}><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></Icon>;
 export const Menu = (p: IconProps) => <Icon {...p}><path d="M3 12h18M3 6h18M3 18h18" /></Icon>;
 export const Image = (p: IconProps) => <Icon {...p}><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></Icon>;
+export const Bold = (p: IconProps) => <Icon {...p}><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></Icon>;
+export const Italic = (p: IconProps) => <Icon {...p}><path d="M19 4h-9M14 20H5M15 4 9 20" /></Icon>;
+export const ListBullet = (p: IconProps) => <Icon {...p}><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="3" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="3" cy="18" r="1.5" fill="currentColor" stroke="none"/></Icon>;
+export const TableIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></Icon>;
+export const Mic = (p: IconProps) => <Icon {...p}><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3M9 22h6"/></Icon>;
+export const StopCircle = (p: IconProps) => <Icon {...p}><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor" stroke="none"/></Icon>;

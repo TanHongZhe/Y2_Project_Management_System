@@ -36,11 +36,18 @@ type ChatRequest = {
   maxTokens?: number;
 };
 
+// Extends ChatMessage with tool-role messages needed for the multi-turn tool loop
+type AnyMessage =
+  | { role: "system" | "user" | "assistant"; content: ChatContent; tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> }
+  | { role: "tool"; tool_call_id: string; content: string };
+
 type ToolName =
   | "log_decision"
   | "add_component"
   | "update_memory"
-  | "log_test_result";
+  | "log_test_result"
+  | "web_search"
+  | "ask_clarification";
 
 type ToolDefinition = {
   type: "function";
@@ -165,6 +172,58 @@ const TOOLS: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "web_search",
+      description:
+        "Search the web for up-to-date information — component datasheets, pricing, availability, or technical specs not present in project documents. Use when retrieved context is clearly insufficient.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "Specific search query (e.g. 'AVX SCCS 5.5V supercapacitor datasheet specs')",
+          },
+          reason: {
+            type: "string",
+            description: "Why the retrieved project context was insufficient",
+          },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ask_clarification",
+      description:
+        "Ask the user a focused multiple-choice question when a critical spec is missing for component recommendation. Call this multiple times in one response (once per missing spec) so ALL questions are batched before the user replies — never spread questions across multiple AI turns.",
+      parameters: {
+        type: "object",
+        properties: {
+          question: {
+            type: "string",
+            description: "The specific question to ask",
+          },
+          options: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "2–4 concrete answer options. Do NOT include 'Decide for me' — it is added automatically.",
+            minItems: 2,
+            maxItems: 4,
+          },
+          context: {
+            type: "string",
+            description: "Brief note explaining why this info is needed",
+          },
+        },
+        required: ["question", "options"],
+      },
+    },
+  },
 ];
 
 const SYSTEM_PROMPT = `You are the project copilot for the Y2 Solar Bus Demonstrator — a small hardware project. Be concise, engineering-accurate, and grounded in retrieved context.
@@ -175,7 +234,9 @@ Rules:
 - Prefer tool calls over verbose prose when the user asks you to "log", "record", "add", "save", or "remember".
 - When calling tools, copy numeric values (prices, quantities, measurements) exactly as stated by the user — never transpose digits (e.g. £4.20 must be passed as 4.20, not 4.02).
 - If a question cannot be answered from retrieved context, say so plainly instead of guessing.
-- Markdown is fine. Keep code blocks short.`;
+- Markdown is fine. Keep code blocks short.
+- When the user asks to find or recommend a component: (1) if specs are missing (voltage, current, capacitance, package, etc.), call ask_clarification MULTIPLE TIMES in one response — one call per missing spec — so all questions are shown to the user at once before any AI round-trip; (2) after the user answers all questions, call web_search to look up real datasheets; (3) return exactly 3 specific recommendations, each with part number, key specs, supplier/URL, and estimated price. Do NOT ask questions one at a time across multiple AI turns.
+- Use web_search whenever retrieved context is clearly insufficient — e.g. current pricing, real-time availability, datasheets for unlisted parts, or verifying technical specs from manufacturer sources.`;
 
 function getConvex(): ConvexHttpClient | null {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL;
@@ -259,7 +320,7 @@ async function buildContext(
 }
 
 async function dispatchToolCall(
-  convex: ConvexHttpClient,
+  convex: ConvexHttpClient | null,
   name: string,
   rawArgs: string,
 ): Promise<{ ok: true; result: string } | { ok: false; error: string }> {
@@ -271,6 +332,54 @@ async function dispatchToolCall(
   }
 
   try {
+    // --- tools that don't need Convex ---
+    if (name === "web_search") {
+      const tavilyKey = process.env.TAVILY_API_KEY;
+      if (!tavilyKey) {
+        return { ok: false, error: "TAVILY_API_KEY not configured — web search unavailable." };
+      }
+      const query = String(args.query ?? "").trim();
+      if (!query) return { ok: false, error: "query is required" };
+
+      const tavilyRes = await fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_key: tavilyKey,
+          query,
+          search_depth: "basic",
+          max_results: 5,
+          include_answer: true,
+        }),
+      });
+
+      if (!tavilyRes.ok) {
+        const errText = await tavilyRes.text().catch(() => "");
+        return { ok: false, error: `Tavily error (${tavilyRes.status}): ${errText.slice(0, 200)}` };
+      }
+
+      const data = await tavilyRes.json() as {
+        answer?: string;
+        results?: Array<{ title: string; url: string; content: string }>;
+      };
+
+      const searchParts: string[] = [];
+      if (data.answer) searchParts.push(`**Direct answer:** ${data.answer}`);
+      for (const r of (data.results ?? []).slice(0, 4)) {
+        searchParts.push(`**${r.title}**\nURL: ${r.url}\n${r.content.slice(0, 500)}`);
+      }
+      return { ok: true, result: searchParts.join("\n\n---\n\n") || "No results found." };
+    }
+
+    if (name === "ask_clarification") {
+      return { ok: true, result: "Clarification requested. Awaiting user response." };
+    }
+
+    // --- tools that need Convex ---
+    if (!convex) {
+      return { ok: false, error: "Convex not configured" };
+    }
+
     if (name === "log_decision") {
       const res = await convex.mutation(api.decisions.create, {
         title: String(args.title ?? ""),
@@ -328,6 +437,7 @@ async function dispatchToolCall(
       });
       return { ok: true, result: `Test ${res.testId} recorded.` };
     }
+
     return { ok: false, error: `unknown tool ${name}` };
   } catch (err) {
     return {
@@ -355,9 +465,10 @@ type StreamEvent =
       id: string;
       name: string;
       args: string;
-      status: "applied" | "error";
+      status: "pending" | "applied" | "error";
       result: string;
     }
+  | { type: "clarification_request"; id: string; question: string; options: string[]; context?: string }
   | { type: "error"; message: string }
   | { type: "done"; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null };
 
@@ -496,7 +607,7 @@ export async function POST(req: NextRequest) {
 
   const fallbackId = isBoost ? MODELS.flash.id : MODELS.boost.id;
 
-  async function callOR(mid: string) {
+  async function callOR(mid: string, opts?: { messages?: AnyMessage[]; noTools?: boolean }) {
     return fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -507,9 +618,9 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         model: mid,
-        messages: upstreamMessages,
-        tools: TOOLS,
-        tool_choice: "auto",
+        messages: opts?.messages ?? upstreamMessages,
+        tools: opts?.noTools ? undefined : TOOLS,
+        tool_choice: opts?.noTools ? undefined : "auto",
         stream: true,
         stream_options: { include_usage: true },
         temperature,
@@ -559,6 +670,7 @@ export async function POST(req: NextRequest) {
           { id: string; name: string; args: string }
         >();
         const executedTools: Array<{
+          id: string;
           name: string;
           args: string;
           status: "applied" | "error";
@@ -567,6 +679,96 @@ export async function POST(req: NextRequest) {
 
         const executedIds = new Set<string>();
         let usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null = null;
+
+        // Filter out model-specific tool-call artefacts that some models (e.g. Mimo/Qwen)
+        // emit as plain text alongside the structured tool_calls field:
+        //   • <tool_call>...</tool_call>  XML blocks
+        //   • [web_search: ...]           bracket notation
+        const TOOL_NAMES = ["web_search","ask_clarification","log_decision","add_component","update_memory","log_test_result"];
+        const BRACKET_OPEN_RE = new RegExp(`\\[(${TOOL_NAMES.join("|")}):`,"i");
+
+        let filterBuf = "";
+        let inXml = false;
+        let inBracket = false;
+
+        function streamContent(delta: string) {
+          if (!delta) return;
+
+          // --- flushing suppressed blocks ---
+          if (inXml) {
+            filterBuf += delta;
+            if (filterBuf.includes("</tool_call>")) {
+              inXml = false;
+              const after = filterBuf.slice(filterBuf.indexOf("</tool_call>") + "</tool_call>".length);
+              filterBuf = "";
+              streamContent(after);
+            }
+            return;
+          }
+          if (inBracket) {
+            filterBuf += delta;
+            const closeIdx = filterBuf.indexOf("]");
+            if (closeIdx !== -1) {
+              inBracket = false;
+              const after = filterBuf.slice(closeIdx + 1);
+              filterBuf = "";
+              streamContent(after);
+            }
+            return;
+          }
+
+          // --- scan combined buffer for suppression triggers ---
+          const combined = filterBuf + delta;
+          filterBuf = "";
+
+          // XML block trigger
+          const xmlIdx = combined.indexOf("<tool_call>");
+          if (xmlIdx !== -1) {
+            const before = combined.slice(0, xmlIdx);
+            if (before) controller.enqueue(encoder.encode(sse({ type: "content", delta: before })));
+            filterBuf = combined.slice(xmlIdx);
+            inXml = true;
+            if (filterBuf.includes("</tool_call>")) {
+              inXml = false;
+              const after = filterBuf.slice(filterBuf.indexOf("</tool_call>") + "</tool_call>".length);
+              filterBuf = "";
+              streamContent(after);
+            }
+            return;
+          }
+
+          // Bracket notation trigger  e.g. [web_search: ...]
+          const bracketMatch = BRACKET_OPEN_RE.exec(combined);
+          if (bracketMatch) {
+            const before = combined.slice(0, bracketMatch.index);
+            if (before) controller.enqueue(encoder.encode(sse({ type: "content", delta: before })));
+            filterBuf = combined.slice(bracketMatch.index);
+            inBracket = true;
+            const closeIdx = filterBuf.indexOf("]");
+            if (closeIdx !== -1) {
+              inBracket = false;
+              const after = filterBuf.slice(closeIdx + 1);
+              filterBuf = "";
+              streamContent(after);
+            }
+            return;
+          }
+
+          // No triggers — hold back any partial opening sequence at the tail
+          const partialXml = combined.match(/<[a-z_]*$/i)?.[0] ?? "";
+          const partialBracket = combined.match(/\[[a-z_]*$/i)?.[0] ?? "";
+          const holdLen = Math.max(
+            partialXml && "<tool_call>".startsWith(partialXml) ? partialXml.length : 0,
+            partialBracket && TOOL_NAMES.some(n => `[${n}:`.startsWith(partialBracket)) ? partialBracket.length : 0,
+          );
+          if (holdLen > 0) {
+            const safe = combined.slice(0, combined.length - holdLen);
+            if (safe) controller.enqueue(encoder.encode(sse({ type: "content", delta: safe })));
+            filterBuf = combined.slice(combined.length - holdLen);
+          } else {
+            if (combined) controller.enqueue(encoder.encode(sse({ type: "content", delta: combined })));
+          }
+        }
 
         async function maybeExecute(index: number) {
           const t = pendingTools.get(index);
@@ -578,7 +780,35 @@ export async function POST(req: NextRequest) {
             return;
           }
           executedIds.add(t.id || `idx-${index}`);
-          if (!convex) {
+
+          // Emit pending status for web_search so the UI can show searching animation
+          if (t.name === "web_search") {
+            controller.enqueue(encoder.encode(sse({
+              type: "tool_call",
+              id: t.id || `idx-${index}`,
+              name: t.name,
+              args: t.args,
+              status: "pending",
+              result: "",
+            })));
+          }
+
+          // Emit the MCQ card data for ask_clarification
+          if (t.name === "ask_clarification") {
+            try {
+              const clArgs = JSON.parse(t.args || "{}") as { question?: string; options?: unknown; context?: string };
+              controller.enqueue(encoder.encode(sse({
+                type: "clarification_request",
+                id: t.id || `idx-${index}`,
+                question: String(clArgs.question ?? ""),
+                options: Array.isArray(clArgs.options) ? clArgs.options.map(String) : [],
+                context: clArgs.context ? String(clArgs.context) : undefined,
+              })));
+            } catch {}
+          }
+
+          // web_search and ask_clarification don't need Convex
+          if (!convex && t.name !== "web_search" && t.name !== "ask_clarification") {
             const ev: StreamEvent = {
               type: "tool_call",
               id: t.id || `idx-${index}`,
@@ -589,6 +819,7 @@ export async function POST(req: NextRequest) {
             };
             controller.enqueue(encoder.encode(sse(ev)));
             executedTools.push({
+              id: t.id || `idx-${index}`,
               name: t.name,
               args: t.args,
               status: "error",
@@ -611,7 +842,7 @@ export async function POST(req: NextRequest) {
               }),
             ),
           );
-          executedTools.push({ name: t.name, args: t.args, status, result });
+          executedTools.push({ id: t.id || `idx-${index}`, name: t.name, args: t.args, status, result });
         }
 
         while (true) {
@@ -644,9 +875,7 @@ export async function POST(req: NextRequest) {
 
             if (typeof delta.content === "string" && delta.content.length > 0) {
               assistantText += delta.content;
-              controller.enqueue(
-                encoder.encode(sse({ type: "content", delta: delta.content })),
-              );
+              streamContent(delta.content);
             }
 
             if (Array.isArray(delta.tool_calls)) {
@@ -673,12 +902,81 @@ export async function POST(req: NextRequest) {
           await maybeExecute(idx);
         }
 
+        // Multi-turn: if web_search ran (and no clarification is pending), feed results
+        // back to the AI so it can synthesise a proper response.
+        const hasWebSearch = executedTools.some(t => t.name === "web_search" && t.status === "applied");
+        const hasClarification = executedTools.some(t => t.name === "ask_clarification");
+
+        if (hasWebSearch && !hasClarification) {
+          const assistantToolCalls = Array.from(pendingTools.values())
+            .filter(t => t.id && t.name)
+            .map(t => ({
+              id: t.id,
+              type: "function" as const,
+              function: { name: t.name, arguments: t.args },
+            }));
+
+          const followUpMessages: AnyMessage[] = [
+            ...upstreamMessages,
+            {
+              role: "assistant" as const,
+              content: assistantText || "",
+              tool_calls: assistantToolCalls,
+            },
+            ...executedTools.map(t => ({
+              role: "tool" as const,
+              tool_call_id: t.id,
+              content: t.result,
+            })),
+            {
+              role: "user" as const,
+              content: "Using the web search results above, please write your final answer in plain prose. Do NOT output any tool call syntax — no <tool_call> blocks, no [web_search: ...] or similar bracket notation.",
+            },
+          ];
+
+          const upstream2 = await callOR(modelId, { messages: followUpMessages, noTools: true }).catch(() => null);
+          if (upstream2?.ok && upstream2.body) {
+            const reader2 = upstream2.body.getReader();
+            let buf2 = "";
+            while (true) {
+              const { value, done } = await reader2.read();
+              if (done) break;
+              buf2 += decoder.decode(value, { stream: true });
+              const lines2 = buf2.split("\n");
+              buf2 = lines2.pop() ?? "";
+              for (const raw of lines2) {
+                const line = raw.trim();
+                if (!line.startsWith("data:")) continue;
+                const payload = line.slice(5).trim();
+                if (!payload || payload === "[DONE]") continue;
+                try {
+                  const json2 = JSON.parse(payload) as {
+                    choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
+                    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+                  };
+                  if (json2.usage) usage = json2.usage;
+                  const delta2 = json2.choices?.[0]?.delta;
+                  if (typeof delta2?.content === "string" && delta2.content.length > 0) {
+                    assistantText += delta2.content;
+                    streamContent(delta2.content);
+                  }
+                } catch {}
+              }
+            }
+          }
+        }
+
         if (threadId && convex) {
           try {
+            const cleanedText = assistantText
+              .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
+              .replace(/\[(web_search|ask_clarification|log_decision|add_component|update_memory|log_test_result)[^\]]*\]/gi, "")
+              .replace(/\n{3,}/g, "\n\n")
+              .trim();
             await convex.mutation(api.messages.send, {
               threadId,
               role: "assistant",
-              content: assistantText,
+              content: cleanedText,
               model: modelId,
               toolCalls: executedTools.length
                 ? executedTools.map((t) => ({

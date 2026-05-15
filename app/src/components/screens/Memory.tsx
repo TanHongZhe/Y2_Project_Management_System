@@ -7,7 +7,7 @@ import { Id } from '../../../convex/_generated/dataModel';
 import { renderMarkdown } from '@/lib/markdown';
 import * as Icons from '../Icons';
 
-export default function Memory({ readOnly }: { readOnly?: boolean }) {
+export default function Memory({ readOnly, searchBar }: { readOnly?: boolean; searchBar?: React.ReactNode }) {
   const notes = useQuery(api.memoryNotes.list, {});
   const upsert = useMutation(api.memoryNotes.upsert);
   const remove = useMutation(api.memoryNotes.remove);
@@ -82,6 +82,7 @@ export default function Memory({ readOnly }: { readOnly?: boolean }) {
           <h1>Project Memory</h1>
         </div>
         <div className="actions">
+          {searchBar}
           <button className="btn ghost sm"><Icons.Eye /><span>Raw markdown</span></button>
           {!readOnly && (
             <button className="btn primary sm" onClick={() => setShowNew(s => !s)}>
