@@ -10,6 +10,12 @@
 !.yarn/releases
 !.yarn/versions
 
+# package-lock.json is intentionally not committed:
+# it gets regenerated cross-platform (Windows dev vs Linux Cloudflare CI)
+# which causes npm ci to fail with missing platform-specific optional deps.
+# Without a lock file, Cloudflare Pages falls back to `npm install`.
+package-lock.json
+
 # testing
 /coverage
 
