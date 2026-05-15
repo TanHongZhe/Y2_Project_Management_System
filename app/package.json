@@ -10,6 +10,7 @@
     "seed": "tsx scripts/ingest.ts"
   },
   "dependencies": {
+    "@floating-ui/dom": "^1.7.6",
     "@tiptap/extension-table": "^3.23.4",
     "@tiptap/extension-table-cell": "^3.23.4",
     "@tiptap/extension-table-header": "^3.23.4",
