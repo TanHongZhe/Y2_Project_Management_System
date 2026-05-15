@@ -144,6 +144,18 @@ export default function Overview({ setRoute, currentUser }: OverviewProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const setImportant = useMutation((api as any).todos.setImportant);
 
+  const recentImages = useQuery(api.progressImages.listWithUrls, {});
+  const slides = React.useMemo(
+    () => (recentImages ?? []).filter(img => img.url).slice(0, 5),
+    [recentImages],
+  );
+  const [slideIdx, setSlideIdx] = useState(0);
+  useEffect(() => {
+    if (slides.length < 2) return;
+    const t = setInterval(() => setSlideIdx(i => (i + 1) % slides.length), 3000);
+    return () => clearInterval(t);
+  }, [slides.length]);
+
   const [newTodo, setNewTodo] = useState("");
   const [myTodosOnly, setMyTodosOnly] = useState(false);
 
@@ -343,70 +355,85 @@ export default function Overview({ setRoute, currentUser }: OverviewProps) {
                       <div key={todo._id} className={`todo-item${todo.important ? " important" : ""}`}>
                         <div
                           className={`todo-checkbox${todo.done ? " checked" : ""}`}
-                          onClick={() => toggleTodo({ id: todo._id })}
+                          onClick={currentUser.isGuest ? undefined : () => toggleTodo({ id: todo._id })}
+                          style={currentUser.isGuest ? { cursor: "default" } : undefined}
                         >
                           {todo.done && <Icons.Check size={10} stroke="#fff" sw={2.5} />}
                         </div>
                         <div className="todo-body">
                           <div className={`todo-text${todo.done ? " done" : ""}`}>{todo.text}</div>
-                          <AssigneePicker
-                            assignedTo={todo.assignedTo}
-                            onToggle={(uid) => handleToggleAssignee(todo._id, todo.assignedTo, uid)}
+                          {!currentUser.isGuest && (
+                            <AssigneePicker
+                              assignedTo={todo.assignedTo}
+                              onToggle={(uid) => handleToggleAssignee(todo._id, todo.assignedTo, uid)}
+                            />
+                          )}
+                        </div>
+                        {dueDateValue && (
+                          <input
+                            type="date"
+                            value={dueDateValue}
+                            readOnly={currentUser.isGuest}
+                            onChange={currentUser.isGuest ? undefined : e => {
+                              const val = e.target.value;
+                              setDueDate({ id: todo._id, dueDate: val ? new Date(val).getTime() : undefined });
+                            }}
+                            title="Due date"
+                            style={{
+                              background: "none",
+                              border: "1px solid var(--line)",
+                              borderRadius: "var(--r-sm)",
+                              color: isOverdue ? "var(--danger)" : dueDateValue ? "var(--text-muted)" : "var(--text-faint)",
+                              fontFamily: "var(--font-mono)",
+                              fontSize: 11,
+                              padding: "2px 6px",
+                              cursor: currentUser.isGuest ? "default" : "pointer",
+                              flexShrink: 0,
+                              colorScheme: "dark",
+                            }}
                           />
-                        </div>
-                        <input
-                          type="date"
-                          value={dueDateValue}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setDueDate({ id: todo._id, dueDate: val ? new Date(val).getTime() : undefined });
-                          }}
-                          title="Due date"
-                          style={{
-                            background: "none",
-                            border: "1px solid var(--line)",
-                            borderRadius: "var(--r-sm)",
-                            color: isOverdue ? "var(--danger)" : dueDateValue ? "var(--text-muted)" : "var(--text-faint)",
-                            fontFamily: "var(--font-mono)",
-                            fontSize: 11,
-                            padding: "2px 6px",
-                            cursor: "pointer",
-                            flexShrink: 0,
-                            colorScheme: "dark",
-                          }}
-                        />
-                        <button
-                          className={`todo-important-btn${todo.important ? " active" : ""}`}
-                          onClick={() => setImportant({ id: todo._id, important: !todo.important })}
-                        >
-                          {todo.important ? "Important" : "Mark as Important"}
-                        </button>
-                        <div className="todo-actions">
+                        )}
+                        {!currentUser.isGuest && (
                           <button
-                            className="btn ghost sm icon-only"
-                            onClick={() => removeTodo({ id: todo._id })}
-                            title="Delete task"
+                            className={`todo-important-btn${todo.important ? " active" : ""}`}
+                            onClick={() => setImportant({ id: todo._id, important: !todo.important })}
                           >
-                            <Icons.X size={11} />
+                            {todo.important ? "Important" : "Mark as Important"}
                           </button>
-                        </div>
+                        )}
+                        {todo.important && currentUser.isGuest && (
+                          <span className="todo-important-btn active" style={{ pointerEvents: "none" }}>Important</span>
+                        )}
+                        {!currentUser.isGuest && (
+                          <div className="todo-actions">
+                            <button
+                              className="btn ghost sm icon-only"
+                              onClick={() => removeTodo({ id: todo._id })}
+                              title="Delete task"
+                            >
+                              <Icons.X size={11} />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })
                 )}
               </div>
-              <div className="todo-add-row">
-                <input
-                  className="todo-add-input"
-                  placeholder="Add a task and press Enter…"
-                  value={newTodo}
-                  onChange={e => setNewTodo(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handleAddTodo()}
-                />
-                <button className="btn sm" onClick={handleAddTodo} disabled={!newTodo.trim()}>
-                  <Icons.Plus size={11} /><span>Add</span>
-                </button>
-              </div>
+              {!currentUser.isGuest && (
+                <div className="todo-add-row">
+                  <input
+                    className="todo-add-input"
+                    placeholder="Add a task and press Enter…"
+                    value={newTodo}
+                    onChange={e => setNewTodo(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handleAddTodo()}
+                  />
+                  <button className="btn sm" onClick={handleAddTodo} disabled={!newTodo.trim()}>
+                    <Icons.Plus size={11} /><span>Add</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Quick links */}
@@ -435,26 +462,51 @@ export default function Overview({ setRoute, currentUser }: OverviewProps) {
             </div>
 
             {/* Recent activity */}
-            <div className="card span-3">
-              <div className="card-head">
-                <h3>Recent activity</h3>
-                <span className="micro" style={{ marginLeft: "auto" }}>latest 10</span>
+            <div className="card span-3" style={{ padding: 0, flexDirection: "row", overflow: "hidden" }}>
+              {/* Photo slideshow */}
+              <div className="overview-slideshow">
+                {slides.length === 0 ? (
+                  <div className="slide-empty">No photos yet</div>
+                ) : (
+                  slides.map((img, i) => (
+                    <img
+                      key={img._id}
+                      src={img.url!}
+                      alt={img.caption ?? ""}
+                      className={"slide-img" + (i === slideIdx ? " active" : "")}
+                    />
+                  ))
+                )}
+                {slides.length > 1 && (
+                  <div className="slide-dots">
+                    {slides.map((_, i) => (
+                      <span key={i} className={"slide-dot" + (i === slideIdx ? " active" : "")} />
+                    ))}
+                  </div>
+                )}
               </div>
-              {recentActivity.length === 0 ? (
-                <div style={{ padding: 16, color: "var(--text-muted)", textAlign: "center" }}>
-                  No activity yet.
+              {/* Activity log */}
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "16px 18px", minWidth: 0 }}>
+                <div className="card-head">
+                  <h3>Recent activity</h3>
+                  <span className="micro" style={{ marginLeft: "auto" }}>latest 10</span>
                 </div>
-              ) : (
-                <div className="activity">
-                  {recentActivity.map((a: { ts: number; who: "ai" | "you"; what: string }, i: number) => (
-                    <div key={i} className="act-row">
-                      <span className="act-ts">{relativeTime(a.ts)}</span>
-                      <span className={"act-who " + a.who}>{a.who === "ai" ? "AI" : "you"}</span>
-                      <span>{a.what}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+                {recentActivity.length === 0 ? (
+                  <div style={{ padding: 16, color: "var(--text-muted)", textAlign: "center" }}>
+                    No activity yet.
+                  </div>
+                ) : (
+                  <div className="activity">
+                    {recentActivity.map((a: { ts: number; who: "ai" | "you"; what: string }, i: number) => (
+                      <div key={i} className="act-row">
+                        <span className="act-ts">{relativeTime(a.ts)}</span>
+                        <span className={"act-who " + a.who}>{a.who === "ai" ? "AI" : "you"}</span>
+                        <span>{a.what}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
           </div>

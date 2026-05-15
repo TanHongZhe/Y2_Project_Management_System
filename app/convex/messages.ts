@@ -22,6 +22,8 @@ const CitationValidator = v.object({
   file: v.string(),
   section: v.optional(v.string()),
   url: v.optional(v.string()),
+  score: v.optional(v.number()),
+  sent: v.optional(v.boolean()),
 });
 
 export const listByThread = query({

@@ -35,7 +35,7 @@ interface StreamingTool {
 
 interface PendingAssistant {
   content: string;
-  citations: Array<{ file: string; section?: string; url?: string }>;
+  citations: Array<{ file: string; section?: string; url?: string; score?: number; sent?: boolean }>;
   toolCalls: StreamingTool[];
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
 }
@@ -90,11 +90,12 @@ function MessageBubble({
     status: "pending" | "applied" | "error";
     result?: string;
   }>;
-  citations?: Array<{ file: string; section?: string; url?: string }>;
+  citations?: Array<{ file: string; section?: string; url?: string; score?: number; sent?: boolean }>;
   streaming?: boolean;
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
 }) {
   const isUser = role === "user";
+  const [showSources, setShowSources] = useState(false);
   return (
     <div className="msg-row">
       <div className={"msg-avatar " + (isUser ? "user" : "ai")}>{isUser ? "ME" : <ModelIcon model={model} />}</div>
@@ -136,14 +137,31 @@ function MessageBubble({
         )}
 
         {citations && citations.length > 0 && (
-          <div className="citations">
-            {citations.map((c, i) => (
-              <span className="citation-chip" key={i} title={c.url ?? c.file}>
-                <span className="num">{i + 1}</span>
-                <span>{c.file}</span>
-                {c.section && <span style={{ color: "var(--text-faint)" }}>· {c.section}</span>}
-              </span>
-            ))}
+          <div className="citations-wrap">
+            <button className="sources-toggle" onClick={() => setShowSources(s => !s)}>
+              {showSources ? "Hide sources" : `Show sources (${citations.length})`}
+            </button>
+            {showSources && (
+              <div className="citations">
+                {citations.map((c, i) => (
+                  <span
+                    className="citation-chip"
+                    key={i}
+                    title={c.url ?? c.file}
+                    style={c.sent === false ? { opacity: 0.4 } : undefined}
+                  >
+                    <span className="num">{i + 1}</span>
+                    <span>{c.file}</span>
+                    {c.section && <span style={{ color: "var(--text-faint)" }}>· {c.section}</span>}
+                    {c.score !== undefined && (
+                      <span style={{ color: "var(--text-faint)", fontSize: "0.82em" }}>
+                        {c.sent === false ? "✗" : ""} {c.score.toFixed(2)}
+                      </span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -165,7 +183,28 @@ function summariseArgs(rawArgs: string): string {
   }
 }
 
+const GUEST_LIMIT = 3;
+const GUEST_KEY = "pms-guest-chat";
+
+function readGuestUsage(): { count: number; resetAt: number } {
+  try {
+    const raw = localStorage.getItem(GUEST_KEY);
+    if (raw) {
+      const d = JSON.parse(raw);
+      if (Date.now() > d.resetAt) return { count: 0, resetAt: Date.now() + 86400000 };
+      return d;
+    }
+  } catch {}
+  return { count: 0, resetAt: Date.now() + 86400000 };
+}
+
+function bumpGuestUsage(): void {
+  const u = readGuestUsage();
+  try { localStorage.setItem(GUEST_KEY, JSON.stringify({ count: u.count + 1, resetAt: u.resetAt })); } catch {}
+}
+
 export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, onSelectThread, userId }: ChatProps) {
+  const isGuest = userId === "guest";
   void _setRoute;
   const threads = useQuery(api.threads.list, { limit: 30, userId });
   const createThread = useMutation(api.threads.create);
@@ -174,6 +213,9 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
   const threadId = (selectedThreadId as Id<"threads"> | null) ?? threads?.[0]?._id ?? null;
 
   const messages = useQuery(api.messages.listByThread, threadId ? { threadId } : "skip");
+
+  const [guestUsage, setGuestUsage] = useState(() => isGuest ? readGuestUsage() : { count: 0, resetAt: 0 });
+  const guestRemaining = Math.max(0, GUEST_LIMIT - guestUsage.count);
 
   const [boost, setBoost] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
@@ -214,6 +256,12 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
   async function handleSend() {
     const userText = draft.trim();
     if (!userText || streaming || fileLoading) return;
+    if (isGuest) {
+      const usage = readGuestUsage();
+      if (usage.count >= GUEST_LIMIT) return;
+      bumpGuestUsage();
+      setGuestUsage(readGuestUsage());
+    }
     setDraft("");
     if (taRef.current) taRef.current.style.height = "auto";
     setAttachedImages([]);
@@ -336,7 +384,7 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
             const delta = obj.delta;
             setPending(prev => prev ? { ...prev, content: prev.content + delta } : prev);
           } else if (type === "citations" && Array.isArray(obj.citations)) {
-            const citations = obj.citations as Array<{ file: string; section?: string; url?: string }>;
+            const citations = obj.citations as Array<{ file: string; section?: string; url?: string; score?: number; sent?: boolean }>;
             setPending(prev => prev ? { ...prev, citations } : prev);
           } else if (type === "tool_call") {
             const toolCall: StreamingTool = {
@@ -547,41 +595,55 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
               )}
               <textarea
                 ref={taRef}
-                placeholder="Ask about the project, or describe a decision to log…"
+                placeholder={isGuest && guestRemaining === 0 ? "Message limit reached — resets in 24 hrs" : "Ask about the project, or describe a decision to log…"}
                 value={draft}
                 onChange={onInput}
                 onKeyDown={onKey}
+                disabled={isGuest && guestRemaining === 0}
               />
               <div className="composer-bar">
                 <div className="left">
-                  <div className="model-picker">
-                    <button className={!boost ? "active" : ""} onClick={() => setBoost(false)} title={MODELS.flash.id}>
-                      <span>{MODELS.flash.label}</span><span className="price">{MODELS.flash.id.split("/")[1]?.slice(0, 10) ?? ""}</span>
-                    </button>
-                    <button className={"boost " + (boost ? "active" : "")} onClick={() => setBoost(true)} title={MODELS.boost.id}>
-                      <Icons.Bolt size={11} /><span>{MODELS.boost.label}</span><span className="price">{MODELS.boost.id.split("/")[1]?.slice(0, 10) ?? ""}</span>
-                    </button>
-                  </div>
-                  <button
-                    className="btn ghost icon-only sm"
-                    title="Attach file or PDF"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={streaming || fileLoading}
-                  >
-                    <Icons.Paperclip size={13} />
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".pdf,.txt,.md,.json,.csv"
-                    multiple
-                    style={{ display: "none" }}
-                    onChange={(e) => void onFileSelect(e)}
-                  />
+                  {isGuest ? (
+                    guestRemaining === 0 ? (
+                      <span className="guest-chat-exhausted">No messages left · Resets in 24 hrs</span>
+                    ) : (
+                      <span className="guest-chat-info">
+                        <strong>{guestRemaining}</strong> message{guestRemaining !== 1 ? "s" : ""} left
+                        <span className="sub"> · Guests are limited to {GUEST_LIMIT} messages every 24 hrs</span>
+                      </span>
+                    )
+                  ) : (
+                    <>
+                      <div className="model-picker">
+                        <button className={!boost ? "active" : ""} onClick={() => setBoost(false)} title={MODELS.flash.id}>
+                          <span>{MODELS.flash.label}</span><span className="price">{MODELS.flash.id.split("/")[1]?.slice(0, 10) ?? ""}</span>
+                        </button>
+                        <button className={"boost " + (boost ? "active" : "")} onClick={() => setBoost(true)} title={MODELS.boost.id}>
+                          <Icons.Bolt size={11} /><span>{MODELS.boost.label}</span><span className="price">{MODELS.boost.id.split("/")[1]?.slice(0, 10) ?? ""}</span>
+                        </button>
+                      </div>
+                      <button
+                        className="btn ghost icon-only sm"
+                        title="Attach file or PDF"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={streaming || fileLoading}
+                      >
+                        <Icons.Paperclip size={13} />
+                      </button>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".pdf,.txt,.md,.json,.csv"
+                        multiple
+                        style={{ display: "none" }}
+                        onChange={(e) => void onFileSelect(e)}
+                      />
+                    </>
+                  )}
                 </div>
                 <div className="right">
-                  <span className="hint"><span className="kbd">⏎</span> send · <span className="kbd">⇧⏎</span> newline · paste image</span>
-                  <button className="btn primary sm" onClick={() => void handleSend()} disabled={!draft.trim() || streaming || fileLoading}>
+                  {!isGuest && <span className="hint"><span className="kbd">⏎</span> send · <span className="kbd">⇧⏎</span> newline · paste image</span>}
+                  <button className="btn primary sm" onClick={() => void handleSend()} disabled={!draft.trim() || streaming || fileLoading || (isGuest && guestRemaining === 0)}>
                     <Icons.Send size={12} />
                     <span>{streaming ? "…" : "Send"}</span>
                   </button>

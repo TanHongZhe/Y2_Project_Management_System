@@ -1,25 +1,88 @@
-# CODING AGENTS: READ THIS FIRST
+# Y2 Project Management System
 
-This is a **handoff bundle** from Claude Design (claude.ai/design).
+An AI-powered project management system built for university-level team projects. Features real-time collaboration, document management with semantic search, AI-assisted decision tracking, and automated progress reporting.
 
-A user mocked up designs in HTML/CSS/JS using an AI design tool, then exported this bundle so a coding agent can implement the designs for real.
+## Features
 
-## What you should do — IMPORTANT
+- **AI Chat** — Ask questions about your project documents using RAG (retrieval-augmented generation)
+- **Document Management** — Upload and semantically search project files
+- **Decision Log** — Track and query past project decisions
+- **Progress Tracking** — Image-based progress updates with AI captioning
+- **Todo Management** — Team task tracking with real-time sync
+- **Overview Dashboard** — Auto-generated project summaries
 
-**Read the chat transcripts first.** There are 1 chat transcript(s) in `chats/`. The transcripts show the full back-and-forth between the user and the design assistant — they tell you **what the user actually wants** and **where they landed** after iterating. Don't skip them. The final HTML files are the output, but the chat is where the intent lives.
+## Tech Stack
 
-**Read `project/Project Memory.html` in full.** The user had this file open when they triggered the handoff, so it's almost certainly the primary design they want built. Read it top to bottom — don't skim. Then **follow its imports**: open every file it pulls in (shared components, CSS, scripts) so you understand how the pieces fit together before you start implementing.
+- **Frontend:** Next.js, React, Tailwind CSS
+- **Backend:** [Convex](https://convex.dev) (real-time database + serverless functions)
+- **AI:** OpenAI (embeddings + image captioning), OpenRouter (LLM)
 
-**If anything is ambiguous, ask the user to confirm before you start implementing.** It's much cheaper to clarify scope up front than to build the wrong thing.
+## Prerequisites
 
-## About the design files
+Before setting up, you will need free/paid accounts for:
 
-The design medium is **HTML/CSS/JS** — these are prototypes, not production code. Your job is to **recreate them pixel-perfectly** in whatever technology makes sense for the target codebase (React, Vue, native, whatever fits). Match the visual output; don't copy the prototype's internal structure unless it happens to fit.
+1. [Convex](https://convex.dev) — free tier available
+2. [OpenAI](https://platform.openai.com) — for embeddings and image captioning
+3. [OpenRouter](https://openrouter.ai) — for LLM access (supports many models)
 
-**Don't render these files in a browser or take screenshots unless the user asks you to.** Everything you need — dimensions, colors, layout rules — is spelled out in the source. Read the HTML and CSS directly; a screenshot won't tell you anything they don't.
+## Setup
 
-## Bundle contents
+### 1. Clone the repository
 
-- `README.md` — this file
-- `chats/` — conversation transcripts (read these!)
-- `project/` — the `Y2 Project Management System` project files (HTML prototypes, assets, components)
+```bash
+git clone https://github.com/TanHongZhe/Y2_Project_Management_System.git
+cd Y2_Project_Management_System/app
+```
+
+### 2. Install dependencies
+
+```bash
+npm install
+```
+
+### 3. Set up Convex
+
+```bash
+npx convex dev
+```
+
+This will prompt you to log in and create a new Convex project. Once done, it will print your deployment URL — keep it handy for the next step.
+
+### 4. Configure environment variables
+
+Copy the example file:
+
+```bash
+cp .env.local.example .env.local
+```
+
+Then open `.env.local` and fill in your keys:
+
+```env
+# From openrouter.ai → Keys
+OPENROUTER_API_KEY=sk-or-...
+OPENROUTER_SITE_URL=http://localhost:3000
+OPENROUTER_APP_NAME=Y2 PMS
+
+# From platform.openai.com → API Keys
+OPENAI_API_KEY=sk-...
+
+# From your Convex dashboard → Settings → URL & Deploy Key
+NEXT_PUBLIC_CONVEX_URL=https://your-deployment.convex.cloud
+CONVEX_DEPLOYMENT=dev:your-deployment
+NEXT_PUBLIC_CONVEX_SITE_URL=https://your-deployment.convex.site
+```
+
+Also add `OPENAI_API_KEY` to your **Convex dashboard** under Settings → Environment Variables, so the backend functions can access it.
+
+### 5. Run the development server
+
+```bash
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+## License
+
+[MIT](../LICENSE) — Tan Hong Zhe, 2026

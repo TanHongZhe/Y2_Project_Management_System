@@ -5,6 +5,7 @@ import { Doc, Id } from "./_generated/dataModel";
 
 const EMBED_MODEL = "text-embedding-3-small";
 const EMBED_DIM = 1536;
+const SCORE_THRESHOLD = 0.32;
 
 async function embedQuery(apiKey: string, text: string): Promise<number[]> {
   const res = await fetch("https://api.openai.com/v1/embeddings", {
@@ -42,6 +43,12 @@ export type RagResult = {
     chunkIndex: number;
     score: number;
   }>;
+  allCandidates: Array<{
+    documentName: string;
+    heading?: string;
+    score: number;
+    sent: boolean;
+  }>;
 };
 
 export const search = action({
@@ -52,10 +59,10 @@ export const search = action({
   handler: async (ctx, { query, limit }): Promise<RagResult> => {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      return { textChunks: [], imageChunks: [] };
+      return { textChunks: [], imageChunks: [], allCandidates: [] };
     }
     if (!query.trim()) {
-      return { textChunks: [], imageChunks: [] };
+      return { textChunks: [], imageChunks: [], allCandidates: [] };
     }
 
     let vector: number[];
@@ -63,14 +70,17 @@ export const search = action({
       vector = await embedQuery(apiKey, query);
     } catch (err) {
       console.error("rag.search embed error", err);
-      return { textChunks: [], imageChunks: [] };
+      return { textChunks: [], imageChunks: [], allCandidates: [] };
     }
 
-    const hits = await ctx.vectorSearch("chunks", "by_embedding", {
-      vector,
-      limit: limit ?? 8,
-    });
-    if (hits.length === 0) return { textChunks: [], imageChunks: [] };
+    const [hits, textHits] = await Promise.all([
+      ctx.vectorSearch("chunks", "by_embedding", {
+        vector,
+        limit: limit ?? 16,
+      }),
+      ctx.runQuery(internal.chunks.searchByText, { query, limit: 5 }),
+    ]);
+    if (hits.length === 0 && textHits.length === 0) return { textChunks: [], imageChunks: [], allCandidates: [] };
 
     const ids = hits.map((h) => h._id);
     const scoreById = new Map<string, number>(hits.map((h) => [h._id, h._score]));
@@ -114,7 +124,51 @@ export const search = action({
     textChunks.sort((a, b) => b.score - a.score);
     imageChunks.sort((a, b) => b.score - a.score);
 
-    return { textChunks, imageChunks };
+    let filteredText = textChunks.filter((c) => c.score >= SCORE_THRESHOLD);
+    let filteredImages = imageChunks.filter((c) => c.score >= SCORE_THRESHOLD);
+
+    // Enforce minimum of 1 result — always send the best chunk even if below threshold
+    if (filteredText.length === 0 && filteredImages.length === 0) {
+      const topText = textChunks[0];
+      const topImage = imageChunks[0];
+      if (topText && (!topImage || topText.score >= topImage.score)) {
+        filteredText = [topText];
+      } else if (topImage) {
+        filteredImages = [topImage];
+      }
+    }
+
+    // Build debug list: all vector candidates with whether they were sent to AI
+    const sentKeys = new Set([
+      ...filteredText.map((c) => `${c.documentName}:${c.chunkIndex}`),
+      ...filteredImages.map((c) => `${c.documentName}:${c.chunkIndex}`),
+    ]);
+    const allCandidates = chunks
+      .map((c) => ({
+        documentName: c.documentName,
+        heading: c.heading,
+        score: scoreById.get(c._id) ?? 0,
+        sent: sentKeys.has(`${c.documentName}:${c.chunkIndex}`),
+      }))
+      .sort((a, b) => b.score - a.score);
+
+    // Keyword-matched chunks not found by vector search (bypass threshold — explicit term match)
+    const vectorIds = new Set(ids.map(String));
+    const keywordOnly = (textHits as Doc<"chunks">[])
+      .filter((c) => !vectorIds.has(String(c._id)) && c.sourceType === "text")
+      .slice(0, 3);
+
+    for (const c of keywordOnly) {
+      filteredText.push({
+        text: c.text,
+        documentName: c.documentName,
+        heading: c.heading,
+        chunkIndex: c.chunkIndex,
+        score: 0.68,
+      });
+    }
+
+    return { textChunks: filteredText, imageChunks: filteredImages, allCandidates };
   },
 });
 

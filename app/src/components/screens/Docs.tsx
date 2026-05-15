@@ -30,7 +30,7 @@ function fmtSize(bytes?: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export default function Docs() {
+export default function Docs({ readOnly }: { readOnly?: boolean }) {
   const docs = useQuery(api.documents.list, { limit: 200 });
   const generateUploadUrl = useMutation(api.documents.generateUploadUrl);
   const createDoc = useMutation(api.documents.create);
@@ -116,16 +116,18 @@ export default function Docs() {
               {uploadStatus}
             </span>
           )}
-          <label className="btn primary sm" style={{ cursor: "pointer" }}>
-            <Icons.Plus /><span>Upload</span>
-            <input
-              type="file"
-              multiple
-              style={{ display: "none" }}
-              onChange={onPickFile}
-              accept=".pdf,.md,.markdown,.json,.txt,image/*"
-            />
-          </label>
+          {!readOnly && (
+            <label className="btn primary sm" style={{ cursor: "pointer" }}>
+              <Icons.Plus /><span>Upload</span>
+              <input
+                type="file"
+                multiple
+                style={{ display: "none" }}
+                onChange={onPickFile}
+                accept=".pdf,.md,.markdown,.json,.txt,image/*"
+              />
+            </label>
+          )}
         </div>
       </header>
 
@@ -162,25 +164,27 @@ export default function Docs() {
               </div>
             ))}
           </div>
-          <label
-            className="docs-drop"
-            style={{ cursor: "pointer", background: dragOver ? "var(--bg-elev)" : undefined }}
-            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={onDrop}
-          >
-            <input
-              type="file"
-              multiple
-              style={{ display: "none" }}
-              onChange={onPickFile}
-              accept=".pdf,.md,.markdown,.json,.txt,image/*"
-            />
-            Drag files here<br />
-            <span style={{ color: "var(--text-faint)" }}>
-              .pdf · .md · .json · .txt · images
-            </span>
-          </label>
+          {!readOnly && (
+            <label
+              className="docs-drop"
+              style={{ cursor: "pointer", background: dragOver ? "var(--bg-elev)" : undefined }}
+              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={onDrop}
+            >
+              <input
+                type="file"
+                multiple
+                style={{ display: "none" }}
+                onChange={onPickFile}
+                accept=".pdf,.md,.markdown,.json,.txt,image/*"
+              />
+              Drag files here<br />
+              <span style={{ color: "var(--text-faint)" }}>
+                .pdf · .md · .json · .txt · images
+              </span>
+            </label>
+          )}
         </aside>
 
         <div className="docs-viewer">
@@ -188,6 +192,7 @@ export default function Docs() {
             {activeDoc ? (
             <ActiveDocView
               doc={activeDoc}
+              readOnly={readOnly}
               onRemove={() => { void removeDoc({ documentId: activeDoc._id }); setActive(null); }}
               onReindex={async () => {
                 setReindexingId(activeDoc._id);
@@ -217,7 +222,7 @@ export default function Docs() {
   );
 }
 
-function ActiveDocView({ doc, onRemove, onReindex }: { doc: Doc<"documents">; onRemove: () => void; onReindex: () => void }) {
+function ActiveDocView({ doc, onRemove, onReindex, readOnly }: { doc: Doc<"documents">; onRemove: () => void; onReindex: () => void; readOnly?: boolean }) {
   return (
     <>
       <h1>{doc.name}</h1>
@@ -249,14 +254,16 @@ function ActiveDocView({ doc, onRemove, onReindex }: { doc: Doc<"documents">; on
         )}
       </div>
 
-      <div style={{ marginTop: 16, display: "flex", gap: 6 }}>
-        <button className="btn sm" onClick={onReindex} title="Re-parse and re-embed this document" disabled={doc.status === "processing"}>
-          <Icons.Branch size={13} /><span>Re-index</span>
-        </button>
-        <button className="btn sm" onClick={onRemove}>
-          <Icons.Trash /><span>Remove from index</span>
-        </button>
-      </div>
+      {!readOnly && (
+        <div style={{ marginTop: 16, display: "flex", gap: 6 }}>
+          <button className="btn sm" onClick={onReindex} title="Re-parse and re-embed this document" disabled={doc.status === "processing"}>
+            <Icons.Branch size={13} /><span>Re-index</span>
+          </button>
+          <button className="btn sm" onClick={onRemove}>
+            <Icons.Trash /><span>Remove from index</span>
+          </button>
+        </div>
+      )}
     </>
   );
 }

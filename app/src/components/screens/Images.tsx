@@ -45,9 +45,10 @@ interface LightboxProps {
   onNavigate: (i: number) => void;
   onUpdateCaption: (id: Id<"progressImages">, caption: string) => void;
   onDelete: (id: Id<"progressImages">) => void;
+  readOnly?: boolean;
 }
 
-function Lightbox({ images, index, onClose, onNavigate, onUpdateCaption, onDelete }: LightboxProps) {
+function Lightbox({ images, index, onClose, onNavigate, onUpdateCaption, onDelete, readOnly }: LightboxProps) {
   const img = images[index];
   const [editingCaption, setEditingCaption] = useState(false);
   const [draft, setDraft] = useState(img?.caption ?? "");
@@ -101,7 +102,7 @@ function Lightbox({ images, index, onClose, onNavigate, onUpdateCaption, onDelet
       </div>
 
       <div className="img-lightbox-footer">
-        {editingCaption ? (
+        {!readOnly && editingCaption ? (
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input
               autoFocus
@@ -116,11 +117,11 @@ function Lightbox({ images, index, onClose, onNavigate, onUpdateCaption, onDelet
         ) : (
           <div
             className={"img-lightbox-caption" + (img.caption ? "" : " placeholder")}
-            onClick={() => setEditingCaption(true)}
-            title="Click to edit caption"
-            style={{ cursor: "text" }}
+            onClick={readOnly ? undefined : () => setEditingCaption(true)}
+            title={readOnly ? undefined : "Click to edit caption"}
+            style={{ cursor: readOnly ? "default" : "text" }}
           >
-            {img.caption || "Click to add a caption…"}
+            {img.caption || (readOnly ? "" : "Click to add a caption…")}
           </div>
         )}
 
@@ -129,15 +130,17 @@ function Lightbox({ images, index, onClose, onNavigate, onUpdateCaption, onDelet
           <span>{fmtDate(img.uploadedAt)}</span>
           <span>uploaded by {img.uploadedBy}</span>
           {img.size && <span>{fmtSize(img.size)}</span>}
-          <span style={{ marginLeft: "auto" }}>
-            <button
-              style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer", padding: "2px 4px" }}
-              title="Delete image"
-              onClick={() => { onDelete(img._id); onClose(); }}
-            >
-              <Icons.Trash size={12} />
-            </button>
-          </span>
+          {!readOnly && (
+            <span style={{ marginLeft: "auto" }}>
+              <button
+                style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer", padding: "2px 4px" }}
+                title="Delete image"
+                onClick={() => { onDelete(img._id); onClose(); }}
+              >
+                <Icons.Trash size={12} />
+              </button>
+            </span>
+          )}
         </div>
       </div>
 
@@ -247,22 +250,26 @@ export default function Images({ currentUser }: ImagesProps) {
             )}
           </h1>
         </div>
-        <div className="actions">
-          <button className="btn primary sm" onClick={() => fileInputRef.current?.click()}>
-            <Icons.ArrowUp />
-            <span>Upload</span>
-          </button>
-        </div>
+        {!currentUser.isGuest && (
+          <div className="actions">
+            <button className="btn primary sm" onClick={() => fileInputRef.current?.click()}>
+              <Icons.ArrowUp />
+              <span>Upload</span>
+            </button>
+          </div>
+        )}
       </header>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*,video/mp4,video/mov,video/webm,video/mkv"
-        multiple
-        style={{ display: "none" }}
-        onChange={e => e.target.files && handleFiles(e.target.files)}
-      />
+      {!currentUser.isGuest && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,video/mp4,video/mov,video/webm,video/mkv"
+          multiple
+          style={{ display: "none" }}
+          onChange={e => e.target.files && handleFiles(e.target.files)}
+        />
+      )}
 
       {/* Category filter */}
       <div className="img-filter-bar">
@@ -288,32 +295,40 @@ export default function Images({ currentUser }: ImagesProps) {
           <div style={{ color: "var(--text-faint)", padding: 40 }}>Loading…</div>
         </div>
       ) : images.length === 0 ? (
-        <div
-          className={"img-dropzone" + (dragOver ? " drag-over" : "")}
-          style={{ flex: 1, margin: "24px 32px", justifyContent: "center" }}
-          onClick={() => fileInputRef.current?.click()}
-          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={onDrop}
-        >
-          <div className="img-dropzone-icon"><Icons.Image size={48} /></div>
-          <div className="img-dropzone-label">Drop images here or click to upload</div>
-          <div className="img-dropzone-sub">PNG · JPG · WEBP · GIF · MP4 · MOV — document your build progress</div>
-        </div>
-      ) : (
-        <>
-          {/* Compact drop strip when there are already images */}
+        currentUser.isGuest ? (
+          <div className="img-gallery-wrap">
+            <div style={{ color: "var(--text-faint)", padding: 40, textAlign: "center", fontFamily: "var(--font-mono)", fontSize: 12 }}>No photos yet.</div>
+          </div>
+        ) : (
           <div
             className={"img-dropzone" + (dragOver ? " drag-over" : "")}
-            style={{ padding: "12px 20px", flexDirection: "row", gap: 10, margin: "16px 32px 0" }}
+            style={{ flex: 1, margin: "24px 32px", justifyContent: "center" }}
             onClick={() => fileInputRef.current?.click()}
             onDragOver={e => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
             onDrop={onDrop}
           >
-            <div className="img-dropzone-icon"><Icons.ArrowUp size={16} /></div>
-            <span className="img-dropzone-label" style={{ fontSize: 12 }}>Drop more images or click to upload</span>
+            <div className="img-dropzone-icon"><Icons.Image size={48} /></div>
+            <div className="img-dropzone-label">Drop images here or click to upload</div>
+            <div className="img-dropzone-sub">PNG · JPG · WEBP · GIF · MP4 · MOV — document your build progress</div>
           </div>
+        )
+      ) : (
+        <>
+          {/* Compact drop strip — hidden for guests */}
+          {!currentUser.isGuest && (
+            <div
+              className={"img-dropzone" + (dragOver ? " drag-over" : "")}
+              style={{ padding: "12px 20px", flexDirection: "row", gap: 10, margin: "16px 32px 0" }}
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={onDrop}
+            >
+              <div className="img-dropzone-icon"><Icons.ArrowUp size={16} /></div>
+              <span className="img-dropzone-label" style={{ fontSize: 12 }}>Drop more images or click to upload</span>
+            </div>
+          )}
 
           <div className="img-gallery-wrap">
             {filtered.length === 0 ? (
@@ -348,18 +363,20 @@ export default function Images({ currentUser }: ImagesProps) {
                       )}
                       <div className="img-card-overlay">
                         <span className="img-card-overlay-caption">{img.caption || ""}</span>
-                        <button
-                          className="img-card-delete"
-                          title="Delete"
-                          onClick={e => { e.stopPropagation(); removeImage({ id: img._id }); }}
-                        >
-                          <Icons.Trash size={11} />
-                        </button>
+                        {!currentUser.isGuest && (
+                          <button
+                            className="img-card-delete"
+                            title="Delete"
+                            onClick={e => { e.stopPropagation(); removeImage({ id: img._id }); }}
+                          >
+                            <Icons.Trash size={11} />
+                          </button>
+                        )}
                       </div>
                     </div>
 
                     <div className="img-card-info">
-                      {editingId === img._id ? (
+                      {!currentUser.isGuest && editingId === img._id ? (
                         <input
                           autoFocus
                           className="img-caption-input"
@@ -375,23 +392,30 @@ export default function Images({ currentUser }: ImagesProps) {
                       ) : (
                         <div
                           className={"img-card-caption" + (img.caption ? "" : " placeholder")}
-                          onClick={() => { setEditingId(img._id); setCaptionDraft(img.caption ?? ""); }}
-                          title="Click to edit caption"
+                          onClick={currentUser.isGuest ? undefined : () => { setEditingId(img._id); setCaptionDraft(img.caption ?? ""); }}
+                          title={currentUser.isGuest ? undefined : "Click to edit caption"}
+                          style={{ cursor: currentUser.isGuest ? "default" : "text" }}
                         >
-                          {img.caption || "Add caption…"}
+                          {img.caption || (currentUser.isGuest ? "" : "Add caption…")}
                         </div>
                       )}
 
                       <div className="img-card-meta">
                         <span className="img-card-date">{fmtDate(img.uploadedAt)}</span>
-                        <select
-                          value={img.category ?? "General"}
-                          onChange={e => changeCategory(img._id, e.target.value)}
-                          onClick={e => e.stopPropagation()}
-                          style={{ background: "none", border: "none", fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--accent-fg)", cursor: "pointer", textTransform: "uppercase", letterSpacing: "0.06em", padding: 0 }}
-                        >
-                          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
+                        {currentUser.isGuest ? (
+                          <span style={{ fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--accent-fg)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                            {img.category ?? "General"}
+                          </span>
+                        ) : (
+                          <select
+                            value={img.category ?? "General"}
+                            onChange={e => changeCategory(img._id, e.target.value)}
+                            onClick={e => e.stopPropagation()}
+                            style={{ background: "none", border: "none", fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--accent-fg)", cursor: "pointer", textTransform: "uppercase", letterSpacing: "0.06em", padding: 0 }}
+                          >
+                            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -410,6 +434,7 @@ export default function Images({ currentUser }: ImagesProps) {
           onNavigate={setLightboxIndex}
           onUpdateCaption={(id, caption) => updateImage({ id, caption })}
           onDelete={(id) => removeImage({ id })}
+          readOnly={currentUser.isGuest}
         />
       )}
     </div>

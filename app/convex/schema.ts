@@ -39,6 +39,7 @@ export default defineSchema({
     heading: v.optional(v.string()),
   })
     .index("by_document", ["documentId", "chunkIndex"])
+    .searchIndex("search_text", { searchField: "text" })
     .vectorIndex("by_embedding", {
       vectorField: "embedding",
       dimensions: 1536,
@@ -169,6 +170,8 @@ export default defineSchema({
           file: v.string(),
           section: v.optional(v.string()),
           url: v.optional(v.string()),
+          score: v.optional(v.number()),
+          sent: v.optional(v.boolean()),
         }),
       ),
     ),

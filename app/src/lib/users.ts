@@ -4,6 +4,7 @@ export interface AppUser {
   initials: string;
   color: string;
   avatarUrl: string;
+  isGuest?: boolean;
 }
 
 // DiceBear adventurer-neutral — face-only avatars, hand-picked seeds.
@@ -59,6 +60,14 @@ export const USERS: AppUser[] = [
     initials: "YD",
     color: "#1ba8a8",
     avatarUrl: "https://api.dicebear.com/9.x/adventurer-neutral/svg?seed=Eden",
+  },
+  {
+    id: "guest",
+    name: "Guest",
+    initials: "G",
+    color: "#6b7280",
+    avatarUrl: "https://api.dicebear.com/9.x/adventurer-neutral/svg?seed=Midnight&backgroundColor=b6e3f4",
+    isGuest: true,
   },
 ];
 

@@ -7,7 +7,7 @@ import { Id } from '../../../convex/_generated/dataModel';
 import { renderMarkdown } from '@/lib/markdown';
 import * as Icons from '../Icons';
 
-export default function Memory() {
+export default function Memory({ readOnly }: { readOnly?: boolean }) {
   const notes = useQuery(api.memoryNotes.list, {});
   const upsert = useMutation(api.memoryNotes.upsert);
   const remove = useMutation(api.memoryNotes.remove);
@@ -83,9 +83,11 @@ export default function Memory() {
         </div>
         <div className="actions">
           <button className="btn ghost sm"><Icons.Eye /><span>Raw markdown</span></button>
-          <button className="btn primary sm" onClick={() => setShowNew(s => !s)}>
-            <Icons.Plus /><span>New section</span>
-          </button>
+          {!readOnly && (
+            <button className="btn primary sm" onClick={() => setShowNew(s => !s)}>
+              <Icons.Plus /><span>New section</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -123,7 +125,7 @@ export default function Memory() {
             last updated {lastUpdateStr} · {(bytes / 1024).toFixed(1)} kB · {totalEntries} sections
           </div>
 
-          {showNew && (
+          {showNew && !readOnly && (
             <div className="memory-section editing" style={{ marginTop: 18 }}>
               <header>
                 <h2>## New section</h2>
@@ -163,7 +165,7 @@ export default function Memory() {
                 <h2>## {s.section}</h2>
                 <span className="author">{s.author}</span>
                 <span className="updated">updated {new Date(s.updatedAt).toISOString().slice(0, 10)}</span>
-                {editingId === s._id ? (
+                {!readOnly && (editingId === s._id ? (
                   <>
                     <button className="btn primary sm edit-btn" onClick={() => commitEdit(s.section)}>
                       <Icons.Check /><span>Save</span>
@@ -181,10 +183,10 @@ export default function Memory() {
                       <Icons.Trash /><span>Delete</span>
                     </button>
                   </>
-                )}
+                ))}
               </header>
               <div className="content">
-                {editingId === s._id ? (
+                {editingId === s._id && !readOnly ? (
                   <textarea
                     autoFocus
                     value={draft}

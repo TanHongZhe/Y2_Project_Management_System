@@ -37,6 +37,16 @@ export const getByIds = internalQuery({
   },
 });
 
+export const searchByText = internalQuery({
+  args: { query: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, { query, limit }) => {
+    return await ctx.db
+      .query("chunks")
+      .withSearchIndex("search_text", (q) => q.search("text", query))
+      .take(limit ?? 5);
+  },
+});
+
 export const deleteByDocument = internalMutation({
   args: { documentId: v.id("documents") },
   handler: async (ctx, { documentId }) => {

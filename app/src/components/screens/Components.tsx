@@ -25,7 +25,7 @@ function SortableTh({
 
 interface EditForm { name: string; qty: string; estCost: string; totalCost: string; supplier: string; model: string; }
 
-export default function Components() {
+export default function Components({ readOnly }: { readOnly?: boolean }) {
   const components = useQuery(api.components.list, { limit: 500 });
   const stats = useQuery(api.overview.stats, {});
   const create = useMutation(api.components.create);
@@ -257,11 +257,13 @@ export default function Components() {
             </span>
           </h1>
         </div>
-        <div className="actions">
-          <button className="btn primary sm" onClick={() => setShowForm(s => !s)}>
-            <Icons.Plus /><span>Add part</span>
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="actions">
+            <button className="btn primary sm" onClick={() => setShowForm(s => !s)}>
+              <Icons.Plus /><span>Add part</span>
+            </button>
+          </div>
+        )}
       </header>
 
       <div className="body">
@@ -485,7 +487,7 @@ export default function Components() {
                         >
                           <Icons.Pdf />
                         </button>
-                      ) : (
+                      ) : !readOnly ? (
                         <label className="btn ghost sm" title="Upload datasheet (PDF)" style={{ cursor: "pointer", fontSize: 11, gap: 4 }}>
                           {uploadingFor === c._id
                             ? <span style={{ opacity: 0.5 }}>Uploading…</span>
@@ -503,14 +505,14 @@ export default function Components() {
                             }}
                           />
                         </label>
-                      )}
+                      ) : <span style={{ color: "var(--text-faint)", fontSize: 11 }}>—</span>}
                     </td>
                     <td>
                       <button
                         className={"status-chip " + c.status}
-                        onClick={() => cycleStatus(c._id, c.status)}
-                        style={{ cursor: "pointer", border: "none" }}
-                        title="Click to advance status"
+                        onClick={readOnly ? undefined : () => cycleStatus(c._id, c.status)}
+                        style={{ cursor: readOnly ? "default" : "pointer", border: "none" }}
+                        title={readOnly ? undefined : "Click to advance status"}
                       >
                         {c.status}
                       </button>
@@ -521,24 +523,26 @@ export default function Components() {
                     <td className="mono right">
                       {c.estCost > 0 ? `£${(c.estCost * c.qty).toFixed(2)}` : <span style={{ color: "var(--text-faint)" }}>—</span>}
                     </td>
-                    <td className="right" style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
-                      <button
-                        className="btn ghost icon-only row-actions"
-                        title="Edit"
-                        onClick={() => editingId === c._id ? setEditingId(null) : startEdit(c)}
-                      >
-                        <Icons.Edit size={12} />
-                      </button>
-                      <button
-                        className="btn ghost icon-only row-actions"
-                        title="Delete"
-                        onClick={() => remove({ id: c._id })}
-                      >
-                        <Icons.Trash />
-                      </button>
-                    </td>
+                    {!readOnly && (
+                      <td className="right" style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
+                        <button
+                          className="btn ghost icon-only row-actions"
+                          title="Edit"
+                          onClick={() => editingId === c._id ? setEditingId(null) : startEdit(c)}
+                        >
+                          <Icons.Edit size={12} />
+                        </button>
+                        <button
+                          className="btn ghost icon-only row-actions"
+                          title="Delete"
+                          onClick={() => remove({ id: c._id })}
+                        >
+                          <Icons.Trash />
+                        </button>
+                      </td>
+                    )}
                   </tr>
-                  {editingId === c._id && (
+                  {editingId === c._id && !readOnly && (
                     <tr className="edit-row">
                       <td colSpan={9}>
                         <div className="inline-edit-form">

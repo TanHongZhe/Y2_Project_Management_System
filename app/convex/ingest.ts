@@ -8,8 +8,8 @@ import { Id } from "./_generated/dataModel";
 const EMBED_MODEL = "text-embedding-3-small";
 const VISION_MODEL = "gpt-4o-mini";
 const EMBED_DIM = 1536;
-const TARGET_CHUNK_CHARS = 2000;
-const OVERLAP_CHARS = 200;
+const TARGET_CHUNK_CHARS = 600;
+const OVERLAP_CHARS = 60;
 
 type DocType = "pdf" | "image" | "md" | "json" | "txt";
 
@@ -78,6 +78,11 @@ function splitToSize(text: string): string[] {
   }
   if (buf) out.push(buf);
   return out.filter((s) => s.trim().length > 0);
+}
+
+function buildEmbedInput(chunk: Chunk, docName: string): string {
+  const prefix = chunk.heading ? `[${docName} > ${chunk.heading}]` : `[${docName}]`;
+  return `${prefix}\n${chunk.text}`;
 }
 
 async function embedTexts(apiKey: string, inputs: string[]): Promise<number[][]> {
@@ -225,7 +230,7 @@ export const processDocument = action({
       let inserted = 0;
       for (let i = 0; i < chunks.length; i += BATCH) {
         const slice = chunks.slice(i, i + BATCH);
-        const embeddings = await embedTexts(apiKey, slice.map((c) => c.text));
+        const embeddings = await embedTexts(apiKey, slice.map((c) => buildEmbedInput(c, doc.name)));
         const records = slice.map((c, j) => ({
           documentId,
           documentName: doc.name,

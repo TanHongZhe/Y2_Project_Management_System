@@ -193,22 +193,22 @@ async function buildContext(
 ): Promise<{
   textBlock: string;
   imageRefs: Array<{ url: string; description: string; documentName: string }>;
-  citations: Array<{ file: string; section?: string; url?: string }>;
+  citations: Array<{ file: string; section?: string; url?: string; score?: number; sent?: boolean }>;
 }> {
   const ragPromise = convex.action(api.rag.search, {
     query: userQuery,
-    limit: 8,
+    limit: 16,
   });
   const memoryPromise = convex.query(api.memoryNotes.list, {});
   const decisionsPromise = convex.query(api.decisions.list, { limit: 5 });
 
   const [rag, memoryNotes, decisions] = await Promise.all([
-    ragPromise.catch(() => ({ textChunks: [], imageChunks: [] })),
+    ragPromise.catch(() => ({ textChunks: [], imageChunks: [], allCandidates: [] })),
     memoryPromise.catch(() => []),
     decisionsPromise.catch(() => []),
   ]);
 
-  const citations: Array<{ file: string; section?: string; url?: string }> = [];
+  const citations: Array<{ file: string; section?: string; url?: string; score?: number; sent?: boolean }> = [];
   const parts: string[] = [];
 
   if (memoryNotes.length > 0) {
@@ -232,7 +232,6 @@ async function buildContext(
     for (const c of rag.textChunks) {
       const heading = c.heading ? ` · ${c.heading}` : "";
       parts.push(`[${c.documentName}${heading}]\n${escapeRecord(c.text)}`);
-      citations.push({ file: c.documentName, section: c.heading });
     }
   }
 
@@ -240,12 +239,12 @@ async function buildContext(
     parts.push("\n=== RETRIEVED IMAGES ===");
     for (const c of rag.imageChunks) {
       parts.push(`[${c.documentName}] ${c.description}`);
-      citations.push({
-        file: c.documentName,
-        section: "image",
-        url: c.url,
-      });
     }
+  }
+
+  // Debug citations: all vector candidates with scores and sent status
+  for (const c of (rag.allCandidates ?? [])) {
+    citations.push({ file: c.documentName, section: c.heading, score: c.score, sent: c.sent });
   }
 
   return {
@@ -350,7 +349,7 @@ type OpenRouterStreamDelta = {
 
 type StreamEvent =
   | { type: "content"; delta: string }
-  | { type: "citations"; citations: Array<{ file: string; section?: string; url?: string }> }
+  | { type: "citations"; citations: Array<{ file: string; section?: string; url?: string; score?: number; sent?: boolean }> }
   | {
       type: "tool_call";
       id: string;
@@ -396,7 +395,7 @@ export async function POST(req: NextRequest) {
   const userQuery = asText(lastUser?.content ?? "");
 
   let contextBlock = "";
-  let citations: Array<{ file: string; section?: string; url?: string }> = [];
+  let citations: Array<{ file: string; section?: string; url?: string; score?: number; sent?: boolean }> = [];
   let imageRefs: Array<{
     url: string;
     description: string;
@@ -406,9 +405,17 @@ export async function POST(req: NextRequest) {
   // Skip RAG for fully-specified action commands — all data is in the message itself.
   const isStructuredAction = /^(add|log|record|update|remove|delete)\s+a?\s*(component|part|decision|test|memory)/i.test(userQuery.trim());
 
+  // Enrich the RAG query with the last assistant turn for follow-up question context.
+  // userQuery (raw) is intentionally kept separate — isStructuredAction must use the raw user message.
+  const lastAssistant = [...body.messages].reverse().find((m) => m.role === "assistant");
+  const priorContext = lastAssistant ? asText(lastAssistant.content).slice(0, 400) : "";
+  const ragQuery = priorContext
+    ? `Prior context: ${priorContext}\n\nQuestion: ${userQuery}`
+    : userQuery;
+
   if (convex && userQuery && !isStructuredAction) {
     try {
-      const ctxBuilt = await buildContext(convex, userQuery);
+      const ctxBuilt = await buildContext(convex, ragQuery);
       contextBlock = ctxBuilt.textBlock;
       citations = ctxBuilt.citations;
       imageRefs = ctxBuilt.imageRefs;
@@ -523,8 +530,7 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       try {
         if (citations.length > 0) {
-          const dedupedCitations = [...new Map(citations.map(c => [c.file, c])).values()];
-          controller.enqueue(encoder.encode(sse({ type: "citations", citations: dedupedCitations })));
+          controller.enqueue(encoder.encode(sse({ type: "citations", citations })));
         }
 
         const reader = upstream.body!.getReader();

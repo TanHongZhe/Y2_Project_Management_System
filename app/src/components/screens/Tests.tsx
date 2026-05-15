@@ -14,7 +14,7 @@ const KNOWN_SUBS = [
   { id: "system", name: "System integration", sub: "end-to-end" },
 ];
 
-export default function Tests() {
+export default function Tests({ readOnly }: { readOnly?: boolean }) {
   const tests = useQuery(api.tests.list, { limit: 500 });
   const create = useMutation(api.tests.create);
   const remove = useMutation(api.tests.remove);
@@ -99,11 +99,13 @@ export default function Tests() {
             </span>
           </h1>
         </div>
-        <div className="actions">
-          <button className="btn primary sm" onClick={() => setShowForm(s => !s)}>
-            <Icons.Plus /><span>New test</span>
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="actions">
+            <button className="btn primary sm" onClick={() => setShowForm(s => !s)}>
+              <Icons.Plus /><span>New test</span>
+            </button>
+          </div>
+        )}
       </header>
 
       <div className="tests-grid">
@@ -135,7 +137,7 @@ export default function Tests() {
         </aside>
 
         <div className="tests-list">
-          {showForm && (
+          {showForm && !readOnly && (
             <div className="card" style={{ marginBottom: 14, padding: 16 }}>
               <h3 style={{ marginTop: 0 }}>New test result</h3>
               <div style={{ display: "grid", gap: 8 }}>
@@ -197,9 +199,11 @@ export default function Tests() {
                 </span>
                 <span className="ts">{new Date(t.testedAt).toISOString().slice(0, 16).replace("T", " ")}</span>
                 <span className="author">{t.author === "ai" ? "ai-logged" : t.author}</span>
-                <button className="btn ghost icon-only" onClick={() => remove({ id: t._id })} title="Delete" style={{ marginLeft: "auto" }}>
-                  <Icons.Trash />
-                </button>
+                {!readOnly && (
+                  <button className="btn ghost icon-only" onClick={() => remove({ id: t._id })} title="Delete" style={{ marginLeft: "auto" }}>
+                    <Icons.Trash />
+                  </button>
+                )}
               </div>
               <div className="body-t">
                 <div className="col">

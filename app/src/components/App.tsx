@@ -46,9 +46,10 @@ const ROUTE_LABELS: Record<string, string> = {
   empty: "New Session",
 };
 
-function loadTweaks(): Tweaks {
+function loadTweaks(userId?: string): Tweaks {
+  if (!userId) return TWEAK_DEFAULTS;
   try {
-    const raw = localStorage.getItem("pms-tweaks");
+    const raw = localStorage.getItem(`pms-tweaks-${userId}`);
     if (raw) return { ...TWEAK_DEFAULTS, ...JSON.parse(raw) };
   } catch {}
   return TWEAK_DEFAULTS;
@@ -60,7 +61,10 @@ export default function App() {
     return id ? (getUserById(id) ?? null) : null;
   });
   const [route, setRouteState] = useState<string>(() => localStorage.getItem("pms-route") ?? "overview");
-  const [tweaks, setTweaksState] = useState<Tweaks>(loadTweaks);
+  const [tweaks, setTweaksState] = useState<Tweaks>(() => {
+    const id = getSavedUserId();
+    return loadTweaks(id ?? undefined);
+  });
   const [selectedThreadId, setSelectedThreadIdState] = useState<string | null>(
     () => localStorage.getItem("pms-thread") ?? null
   );
@@ -92,7 +96,8 @@ export default function App() {
   const setTweak = useCallback((key: string, value: unknown) => {
     setTweaksState(prev => {
       const next = { ...prev, [key]: value };
-      try { localStorage.setItem("pms-tweaks", JSON.stringify(next)); } catch {}
+      const id = getSavedUserId();
+      if (id) try { localStorage.setItem(`pms-tweaks-${id}`, JSON.stringify(next)); } catch {}
       return next;
     });
   }, []);
@@ -125,13 +130,14 @@ export default function App() {
   function handleSelectUser(user: AppUser) {
     saveUserId(user.id);
     setCurrentUser(user);
-    // Reset thread selection when switching users
+    setTweaksState(loadTweaks(user.id));
     setSelectedThreadId(null);
   }
 
   function handleSwitchUser() {
     clearUserId();
     setCurrentUser(null);
+    setTweaksState(TWEAK_DEFAULTS);
     setSelectedThreadId(null);
   }
 
@@ -147,11 +153,11 @@ export default function App() {
   let screen: React.ReactNode = null;
   if (route === "overview")       screen = <Overview setRoute={setRoute} currentUser={currentUser} />;
   else if (route === "chat")      screen = <Chat tweaks={tweaks} setRoute={setRoute} selectedThreadId={selectedThreadId} onSelectThread={setSelectedThreadId} userId={currentUser.id} />;
-  else if (route === "memory")    screen = <Memory />;
+  else if (route === "memory")    screen = <Memory readOnly={currentUser.isGuest} />;
   else if (route === "images")    screen = <Images currentUser={currentUser} />;
-  else if (route === "components") screen = <Components />;
-  else if (route === "tests")     screen = <Tests />;
-  else if (route === "docs")      screen = <Docs />;
+  else if (route === "components") screen = <Components readOnly={currentUser.isGuest} />;
+  else if (route === "tests")     screen = <Tests readOnly={currentUser.isGuest} />;
+  else if (route === "docs")      screen = <Docs readOnly={currentUser.isGuest} />;
   else if (route === "settings")  screen = <Settings tweaks={tweaks} setTweak={setTweak} selectedThreadId={selectedThreadId} onClearThread={handleClearThread} />;
   else if (route === "empty")     screen = <Empty setRoute={setRoute} />;
 
