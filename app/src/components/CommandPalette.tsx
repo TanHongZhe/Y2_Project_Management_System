@@ -8,7 +8,7 @@ import * as Icons from './Icons';
 const NAV_ITEMS = [
   { label: "Overview",           route: "overview",    icon: "Dash" },
   { label: "Chat",               route: "chat",        icon: "Chat" },
-  { label: "Meetings",           route: "meetings",    icon: "Chat" },
+  { label: "Notes",              route: "meetings",    icon: "Chat" },
   { label: "Project Memory",     route: "memory",      icon: "Memory" },
   { label: "Calendar",           route: "calendar",    icon: "Calendar" },
   { label: "Images",             route: "images",      icon: "Image" },

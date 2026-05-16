@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
 
 export const list = query({
   args: {},
@@ -24,6 +24,7 @@ export const create = mutation({
     attendees: v.array(v.string()),
     content: v.string(),
     createdBy: v.string(),
+    source: v.optional(v.union(v.literal("meeting"), v.literal("aria"), v.literal("note"))),
   },
   handler: async (ctx, args) => {
     return ctx.db.insert("meetingNotes", { ...args, updatedAt: Date.now() });
@@ -37,13 +38,73 @@ export const update = mutation({
     content: v.optional(v.string()),
     attendees: v.optional(v.array(v.string())),
     date: v.optional(v.number()),
+    editorId: v.optional(v.string()),
   },
-  handler: async (ctx, { id, ...fields }) => {
-    const updates = Object.fromEntries(
+  handler: async (ctx, { id, editorId, ...fields }) => {
+    const updates: Record<string, unknown> = Object.fromEntries(
       Object.entries(fields).filter(([, val]) => val !== undefined),
     );
+    if (editorId) {
+      const doc = await ctx.db.get(id);
+      const existing = doc?.editedBy ?? [];
+      if (!existing.includes(editorId) && editorId !== doc?.createdBy) {
+        updates.editedBy = [...existing, editorId];
+      }
+    }
     await ctx.db.patch(id, { ...updates, updatedAt: Date.now() });
   },
+});
+
+export const ariaAppend = internalMutation({
+  args: {
+    id: v.id("meetingNotes"),
+    appendMd: v.string(),
+    newSources: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, { id, appendMd, newSources }) => {
+    const doc = await ctx.db.get(id);
+    if (!doc) throw new Error("Note not found");
+    const existingEditors = doc.editedBy ?? [];
+    const mergedSources = newSources && newSources.length > 0
+      ? [...new Set([...(doc.sources ?? []), ...newSources])]
+      : doc.sources;
+    await ctx.db.patch(id, {
+      content: doc.content + "\n\n---\n\n" + appendMd,
+      updatedAt: Date.now(),
+      editedBy: existingEditors.includes("aria") ? existingEditors : [...existingEditors, "aria"],
+      ...(mergedSources ? { sources: mergedSources } : {}),
+    });
+    return id;
+  },
+});
+
+export const ariaReplace = internalMutation({
+  args: {
+    id: v.id("meetingNotes"),
+    content: v.string(),
+    title: v.optional(v.string()),
+    newSources: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, { id, content, title, newSources }) => {
+    const doc = await ctx.db.get(id);
+    if (!doc) throw new Error("Note not found");
+    const existingEditors = doc.editedBy ?? [];
+    // Refine is destructive: the body is fully rewritten, so the source list
+    // should reflect the rewrite — replace, don't preserve stale citations.
+    await ctx.db.patch(id, {
+      content,
+      ...(title ? { title } : {}),
+      updatedAt: Date.now(),
+      editedBy: existingEditors.includes("aria") ? existingEditors : [...existingEditors, "aria"],
+      sources: newSources && newSources.length > 0 ? newSources : [],
+    });
+    return id;
+  },
+});
+
+export const getByIdInternal = internalQuery({
+  args: { id: v.id("meetingNotes") },
+  handler: async (ctx, { id }) => ctx.db.get(id),
 });
 
 export const remove = mutation({

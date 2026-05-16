@@ -60,7 +60,7 @@ export default function Sidebar({ route, setRoute, selectedThreadId, onSelectThr
 
   const navItems = [
     { id: "memory",     label: "Project Memory",  Icon: Icons.Memory,   count: String(counts.memoryNotes || "") },
-    { id: "meetings",   label: "Meeting Notes",   Icon: Icons.Chat,     count: "" },
+    { id: "meetings",   label: "Notes",            Icon: Icons.Chat,     count: "" },
     { id: "calendar",   label: "Calendar",         Icon: Icons.Calendar, count: "" },
     { id: "images",     label: "Images",           Icon: Icons.Image,    count: String((counts as Record<string, number>).images || "") },
     { id: "components", label: "Components",       Icon: Icons.Chip,     count: String(counts.components || "") },
@@ -75,11 +75,7 @@ export default function Sidebar({ route, setRoute, selectedThreadId, onSelectThr
           <>
             <span className="project-id">{PROJECT.id}</span>
             <span className="project-name">{PROJECT.name}</span>
-            <div className="project-meta">
-              <span>{PROJECT.course}</span>
-              <span>·</span>
-              <span>{PROJECT.semester}</span>
-            </div>
+            <div className="project-meta">{PROJECT.course} · {PROJECT.semester}</div>
           </>
         )}
         <div className="sidebar-header-actions">

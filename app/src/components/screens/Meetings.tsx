@@ -108,6 +108,49 @@ function getBestMimeType(): string {
   return types.find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
 }
 
+function NoteSources({ sources }: { sources: string[] }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className="citations-wrap">
+      <button className="sources-toggle" onClick={() => setOpen((o) => !o)}>
+        {open ? 'Hide sources' : `Show sources (${sources.length})`}
+      </button>
+      {open && (
+        <div className="citations">
+          {sources.map((src, i) => {
+            const dashIdx = src.indexOf(' — ');
+            const file = dashIdx !== -1 ? src.slice(0, dashIdx) : src;
+            const section = dashIdx !== -1 ? src.slice(dashIdx + 3) : undefined;
+            return (
+              <span className="citation-chip" key={i}>
+                <span className="num">{i + 1}</span>
+                <span>{file}</span>
+                {section && <span style={{ color: 'var(--text-faint)' }}>· {section}</span>}
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MliAvatar({ user, title }: { user: { initials: string; color: string; avatarUrl?: string; name?: string; isAria?: boolean }; title?: string }) {
+  const [failed, setFailed] = React.useState(false);
+  if (user.isAria && user.avatarUrl && !failed) {
+    return (
+      <span className="mli-avatar mli-avatar-img" title={title}>
+        <img src={user.avatarUrl} alt={user.name ?? user.initials} onError={() => setFailed(true)} />
+      </span>
+    );
+  }
+  return (
+    <span className="mli-avatar" style={{ background: user.color }} title={title}>
+      {user.initials}
+    </span>
+  );
+}
+
 export default function Meetings({ currentUser, readOnly, searchBar, selectedMeetingId, onMeetingConsumed, pendingRecord, onRecordConsumed }: MeetingsProps) {
   const meetings = useQuery(api.meetings.list, {});
   const memoryNotes = useQuery(api.memoryNotes.list, {});
@@ -119,6 +162,9 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
   const saveAudio = useMutation(api.meetings.saveAudio);
   const deleteAudio = useMutation(api.meetings.deleteAudio);
   const syncMentions = useMutation(api.notifications.syncMentions);
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const triggerAriaFromNote = useMutation((api as any).teamChat.triggerAriaFromNote);
+  /* eslint-enable @typescript-eslint/no-explicit-any */
   const toast = useToast();
 
   const [selectedId, setSelectedId] = useState<Id<"meetingNotes"> | null>(null);
@@ -151,6 +197,16 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
   const [audioUploading, setAudioUploading] = useState(false);
   const [recordBlocked, setRecordBlocked] = useState(false);
   const mentionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Separate timer for Aria trigger — 4s so the user finishes typing before it fires
+  const ariaTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks which note IDs have already triggered Aria this session (avoids re-firing on every keystroke)
+  const ariaTriggeredNotes = useRef<Set<string>>(new Set());
+  // Stores the pending Aria trigger so it can fire on unmount if debounce hasn't elapsed
+  const pendingAriaRef = useRef<{ content: string; noteId: Id<"meetingNotes"> } | null>(null);
+  // Tracks the last server content we've observed for the selected note. Used to
+  // detect external edits (e.g. Aria appending/refining) so we can pull them into
+  // the editor without clobbering an in-flight local save.
+  const lastServerContentRef = useRef<string | null>(null);
 
   const canRecord = typeof window !== 'undefined' && typeof MediaRecorder !== 'undefined';
 
@@ -206,10 +262,13 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
     if (selectedMeeting) {
       setTitle(selectedMeeting.title);
       setContent(selectedMeeting.content);
+      lastServerContentRef.current = selectedMeeting.content;
       setAttendees(selectedMeeting.attendees);
       setDate(selectedMeeting.date);
       setSyncMsg(null);
       setTranscribeError(null);
+    } else {
+      lastServerContentRef.current = null;
     }
     // Clear local-only audio when switching meetings; the persisted URL takes over.
     setLocalAudioUrl((prev) => {
@@ -219,11 +278,50 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
     setRecordBlocked(false);
   }, [selectedId]);
 
+  // Pull in external edits (Aria append/refine) when the server content changes
+  // out from under us. Skips while a local save is pending so we don't clobber
+  // an in-flight edit. Also re-arms the @aria-per-note guard so a fresh @aria
+  // mention in an Aria-modified note can trigger again.
+  useEffect(() => {
+    if (!selectedMeeting || !selectedId) return;
+    const serverContent = selectedMeeting.content;
+    const prev = lastServerContentRef.current;
+    if (prev === null) {
+      lastServerContentRef.current = serverContent;
+      return;
+    }
+    if (serverContent === prev) return;
+    // Server content moved. If our local state already matches, this was our
+    // own save being acknowledged — just update the tracker and bail.
+    if (serverContent === content) {
+      lastServerContentRef.current = serverContent;
+      return;
+    }
+    // Don't pull while a local save is mid-flight; the user is mid-typing and
+    // our save will land momentarily. The next server tick will reconcile.
+    if (saveTimer.current || isSaving) return;
+    lastServerContentRef.current = serverContent;
+    setContent(serverContent);
+    editorRef.current?.setContent(serverContent);
+    // An Aria edit landed → allow @aria to fire again in this note this session.
+    ariaTriggeredNotes.current.delete(selectedId as string);
+  }, [selectedMeeting?.content, selectedId, content, isSaving]);
+
   // Stop recording and release mic on unmount
   useEffect(() => {
     return () => {
       if (recordTimerRef.current) clearInterval(recordTimerRef.current);
       if (mentionTimerRef.current) clearTimeout(mentionTimerRef.current);
+      if (ariaTimerRef.current) {
+        clearTimeout(ariaTimerRef.current);
+        // Fire immediately if user navigated away before the debounce elapsed
+        const pending = pendingAriaRef.current;
+        if (pending && !ariaTriggeredNotes.current.has(pending.noteId as string)) {
+          ariaTriggeredNotes.current.add(pending.noteId as string);
+          pendingAriaRef.current = null;
+          void triggerAriaFromNote({ authorId: currentUser.id, content: pending.content, noteId: pending.noteId });
+        }
+      }
       if (mediaRecorderRef.current) {
         mediaRecorderRef.current.onstop = null;
         try { mediaRecorderRef.current.stop(); } catch { /* already stopped */ }
@@ -240,7 +338,10 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
     setSavedRecently(false);
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      void update({ id: selectedId!, ...patch }).then(() => {
+      // Clear the handle so the external-sync effect can tell a save is no
+      // longer pending (the ref is also used as the "save in flight" signal).
+      saveTimer.current = null;
+      void update({ id: selectedId!, ...patch, editorId: currentUser.id }).then(() => {
         setIsSaving(false);
         setSavedRecently(true);
         setTimeout(() => setSavedRecently(false), 2000);
@@ -251,21 +352,46 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
   // Debounced @mention sync — fires 1.2s after the last keystroke.
   // Compares the current set of mentioned users against what's stored and
   // creates / deletes notifications to keep them in sync.
+  // Aria trigger uses a separate 4s debounce so the user has time to finish
+  // their instruction before Aria starts generating.
   function scheduleMentionCheck(md: string) {
     if (!selectedId || readOnly) return;
-    if (mentionTimerRef.current) clearTimeout(mentionTimerRef.current);
     const meetingId = selectedId;
     const meetingTitle = title;
+
+    // Human mention sync — 1.2s
+    if (mentionTimerRef.current) clearTimeout(mentionTimerRef.current);
     mentionTimerRef.current = setTimeout(() => {
       const mentioned = extractMentionedUserIds(md, currentUser.id);
+      const humanMentioned = mentioned.filter((id) => id !== 'aria');
       void syncMentions({
         linkId: meetingId as string,
         linkRoute: 'meetings',
         contextLabel: meetingTitle,
         fromUserId: currentUser.id,
-        mentionedUserIds: mentioned,
+        mentionedUserIds: humanMentioned,
       });
     }, 1200);
+
+    // Aria trigger — 10s debounce, fires once per note per session (also fires on unmount)
+    if (ariaTimerRef.current) clearTimeout(ariaTimerRef.current);
+    const mentioned = extractMentionedUserIds(md, currentUser.id);
+    if (mentioned.includes('aria') && !ariaTriggeredNotes.current.has(meetingId as string)) {
+      pendingAriaRef.current = { content: md, noteId: meetingId as Id<"meetingNotes"> };
+      ariaTimerRef.current = setTimeout(() => {
+        pendingAriaRef.current = null;
+        if (!ariaTriggeredNotes.current.has(meetingId as string)) {
+          ariaTriggeredNotes.current.add(meetingId as string);
+          void triggerAriaFromNote({
+            authorId: currentUser.id,
+            content: md,
+            noteId: meetingId as Id<"meetingNotes">,
+          });
+        }
+      }, 10000);
+    } else {
+      pendingAriaRef.current = null;
+    }
   }
 
   async function handleDeleteAudio() {
@@ -287,6 +413,19 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
       attendees: [currentUser.id],
       content: "",
       createdBy: currentUser.id,
+      source: "meeting",
+    });
+    setSelectedId(id as Id<"meetingNotes">);
+  }
+
+  async function handleCreateNote() {
+    const id = await create({
+      title: `Note ${fmtDate(Date.now())}`,
+      date: Date.now(),
+      attendees: [currentUser.id],
+      content: "",
+      createdBy: currentUser.id,
+      source: "note",
     });
     setSelectedId(id as Id<"meetingNotes">);
   }
@@ -493,8 +632,8 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
     <>
       <header className="screen-header">
         <div className="title-block">
-          <div className="crumb">Workspace · meetings</div>
-          <h1>Meeting Notes</h1>
+          <div className="crumb">Workspace · Notes</div>
+          <h1>Notes</h1>
         </div>
         <div className="actions">
           {searchBar}
@@ -539,9 +678,14 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
             )
           )}
           {!readOnly && (
-            <button className="btn primary sm" onClick={handleCreate}>
-              <Icons.Plus size={13} /><span>New meeting</span>
-            </button>
+            <>
+              <button className="btn sm" onClick={handleCreateNote}>
+                <Icons.Plus size={13} /><span>New note</span>
+              </button>
+              <button className="btn primary sm" onClick={handleCreate}>
+                <Icons.Plus size={13} /><span>New meeting</span>
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -562,19 +706,46 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
           {meetings?.filter(m => !pendingDeleteIds.has(m._id)).map((m) => {
             const now = Date.now();
             const ago = now - (m.updatedAt ?? m._creationTime ?? 0);
-            const borderColor = ago < 86_400_000 ? 'var(--accent)'
+            const isMeeting = !m.source || m.source === 'meeting';
+            const borderColor = ago < 86_400_000
+              ? (isMeeting ? 'var(--warn)' : 'var(--accent)')
               : ago < 7 * 86_400_000 ? 'var(--line-strong)' : 'transparent';
+            const creator = USERS.find(u => u.id === m.createdBy);
+            const editors = (m.editedBy ?? [])
+              .filter(id => id !== m.createdBy)
+              .slice(0, 3)
+              .map(id => USERS.find(u => u.id === id) ?? { id, initials: id.slice(0, 2).toUpperCase(), color: '#6b7280', name: id, avatarUrl: '' });
             return (
               <div
                 key={m._id}
-                className={"meeting-list-item" + (selectedId === m._id ? " active" : "")}
+                className={"meeting-list-item" + (selectedId === m._id ? " active" : "") + (isMeeting ? " meeting-type" : "")}
                 onClick={() => setSelectedId(m._id)}
                 style={{ borderLeft: `3px solid ${borderColor}` }}
               >
-                <div className="mli-title">{m.title}</div>
+                <div className="mli-title">
+                  {m.title}
+                  {m.source === 'aria' && (
+                    <span className="mli-aria-badge">Aria</span>
+                  )}
+                </div>
                 <div className="mli-date">
                   {m.updatedAt ? relativeTimestamp(m.updatedAt) + ' · ' : ''}{fmtDate(m.date)}
                 </div>
+                {(creator || editors.length > 0) && (
+                  <div className="mli-collab">
+                    {creator && (
+                      <MliAvatar user={creator} title={`Created by ${creator.name}`} />
+                    )}
+                    {editors.length > 0 && (
+                      <>
+                        <span className="mli-collab-sep" />
+                        {editors.map(e => (
+                          <MliAvatar key={e.id} user={e} title={`Edited by ${e.name}`} />
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -598,11 +769,6 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
                   placeholder="Meeting title"
                   onChange={(e) => { setTitle(e.target.value); scheduleSave({ title: e.target.value }); }}
                 />
-                {!readOnly && (
-                  <span className="autosave-indicator" aria-live="polite">
-                    {isSaving ? 'Saving…' : savedRecently ? 'Saved ✓' : ''}
-                  </span>
-                )}
                 <input
                   type="date"
                   className="meeting-date-field"
@@ -615,42 +781,83 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
                 />
               </div>
 
-              <div className="meeting-attendees-row">
-                <div className="meeting-attendees-left">
-                  <span className="meeting-attendees-label">Attendees</span>
-                  <div className="meeting-attendees-chips">
-                    {USERS.filter((u) => !u.isGuest).map((u) => (
-                      <button
-                        key={u.id}
-                        className={"attendee-chip" + (attendees.includes(u.id) ? " active" : "")}
-                        style={attendees.includes(u.id) ? { background: u.color, color: "#fff", borderColor: u.color } : undefined}
-                        onClick={() => toggleAttendee(u.id)}
-                        title={u.name}
-                      >
-                        {u.initials}
-                      </button>
-                    ))}
+              {selectedMeeting.source === 'note' || selectedMeeting.source === 'aria' ? (
+                /* Notes: show creator + editors instead of attendees */
+                <div className="meeting-attendees-row">
+                  <div className="meeting-attendees-left note-collab-row">
+                    {(() => {
+                      const noteCreator = USERS.find(u => u.id === selectedMeeting.createdBy);
+                      const noteEditors = (selectedMeeting.editedBy ?? [])
+                        .filter(id => id !== selectedMeeting.createdBy)
+                        .map(id => USERS.find(u => u.id === id) ?? { id, initials: id.slice(0, 2).toUpperCase(), color: '#6b7280', name: id, avatarUrl: '' });
+                      return (
+                        <>
+                          <div className="note-collab-group">
+                            <span className="note-collab-label">Creator</span>
+                            {noteCreator
+                              ? <MliAvatar user={noteCreator} title={noteCreator.name} />
+                              : <span className="note-collab-empty">—</span>}
+                          </div>
+                          <div className="note-collab-group">
+                            <span className="note-collab-label">Editors</span>
+                            {noteEditors.length > 0
+                              ? noteEditors.map(e => <MliAvatar key={e.id} user={e} title={e.name} />)
+                              : <span className="note-collab-empty">None yet</span>}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
+                  {!readOnly && (
+                    <span className="autosave-indicator" aria-live="polite">
+                      {isSaving ? 'Saving…' : savedRecently ? 'Saved ✓' : ''}
+                    </span>
+                  )}
                 </div>
-                {playerSrc && (
-                  <div className="meeting-audio-wrap">
-                    <AudioPlayer
-                      src={playerSrc}
-                      uploading={audioUploading}
-                      filename={`${title || 'recording'}.webm`}
-                    />
-                    {!readOnly && (
-                      <button
-                        className="ap-btn ap-delete"
-                        title="Delete recording (lets you record again)"
-                        onClick={handleDeleteAudio}
-                      >
-                        <Icons.Trash size={13} />
-                      </button>
-                    )}
+              ) : (
+                /* Meetings: full attendees picker + audio */
+                <div className="meeting-attendees-row">
+                  <div className="meeting-attendees-left">
+                    <span className="meeting-attendees-label">Attendees</span>
+                    <div className="meeting-attendees-chips">
+                      {USERS.filter((u) => !u.isGuest).map((u) => (
+                        <button
+                          key={u.id}
+                          className={"attendee-chip" + (attendees.includes(u.id) ? " active" : "")}
+                          style={attendees.includes(u.id) ? { background: u.color, color: "#fff", borderColor: u.color } : undefined}
+                          onClick={() => toggleAttendee(u.id)}
+                          title={u.name}
+                        >
+                          {u.initials}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                )}
-              </div>
+                  {playerSrc && (
+                    <div className="meeting-audio-wrap">
+                      <AudioPlayer
+                        src={playerSrc}
+                        uploading={audioUploading}
+                        filename={`${title || 'recording'}.webm`}
+                      />
+                      {!readOnly && (
+                        <button
+                          className="ap-btn ap-delete"
+                          title="Delete recording (lets you record again)"
+                          onClick={handleDeleteAudio}
+                        >
+                          <Icons.Trash size={13} />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {!readOnly && (
+                    <span className="autosave-indicator" aria-live="polite">
+                      {isSaving ? 'Saving…' : savedRecently ? 'Saved ✓' : ''}
+                    </span>
+                  )}
+                </div>
+              )}
 
               <MeetingEditor
                 ref={editorRef}
@@ -703,6 +910,9 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
                   )}
                 </div>
                 <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  {selectedMeeting.sources && selectedMeeting.sources.length > 0 && (
+                    <NoteSources sources={selectedMeeting.sources} />
+                  )}
                   {content.trim() && (
                     <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
                       {wordCount(content)} words · ~{Math.ceil(wordCount(content) / 200)} min read

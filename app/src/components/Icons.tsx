@@ -40,6 +40,7 @@ export const ArrowUp = (p: IconProps) => <Icon {...p}><path d="M12 19V5M5 12l7-7
 export const SwitchArrows = (p: IconProps) => <Icon {...p}><path d="M17 4l4 4-4 4M3 8h18M7 20l-4-4 4-4M21 16H3" /></Icon>;
 export const ChevronLeft = (p: IconProps) => <Icon {...p}><path d="M15 18l-6-6 6-6" /></Icon>;
 export const ChevronRight = (p: IconProps) => <Icon {...p}><path d="M9 18l6-6-6-6" /></Icon>;
+export const ChevronDown = (p: IconProps) => <Icon {...p}><path d="M6 9l6 6 6-6" /></Icon>;
 export const Download = (p: IconProps) => <Icon {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></Icon>;
 export const Filter = (p: IconProps) => <Icon {...p}><path d="M3 4h18l-7 9v6l-4-2v-4z" /></Icon>;
 export const Clock = (p: IconProps) => <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Icon>;

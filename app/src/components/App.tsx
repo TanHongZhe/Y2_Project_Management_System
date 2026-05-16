@@ -20,7 +20,10 @@ import Calendar from './screens/Calendar';
 import CommandPalette from './CommandPalette';
 import GlobalSearch from './GlobalSearch';
 import NotificationBell from './NotificationBell';
+import TeamChat from './TeamChat';
 import { AppUser, getSavedUserId, saveUserId, clearUserId, getUserById } from '../lib/users';
+import { useMutation } from 'convex/react';
+import { api } from '../../convex/_generated/api';
 
 interface Tweaks {
   theme: string;
@@ -50,7 +53,7 @@ const ROUTE_LABELS: Record<string, string> = {
   docs: "Docs",
   settings: "Settings",
   empty: "New Session",
-  meetings: "Meeting Notes",
+  meetings: "Notes",
   calendar: "Calendar",
 };
 
@@ -84,6 +87,7 @@ export default function App() {
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
   const [pendingRecord, setPendingRecord] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
 
   const handleToggleCollapse = useCallback(() => {
     setSidebarCollapsed(c => {
@@ -133,6 +137,17 @@ export default function App() {
     return () => mq.removeEventListener('change', handler);
   }, [tweaks.theme]);
 
+  // Heartbeat — keeps this user's presence alive in the heartbeats table
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const pingHeartbeat = useMutation((api as any).heartbeats.ping);
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+  useEffect(() => {
+    if (!currentUser || currentUser.isGuest) return;
+    void pingHeartbeat({ userId: currentUser.id });
+    const id = setInterval(() => void pingHeartbeat({ userId: currentUser.id }), 30_000);
+    return () => clearInterval(id);
+  }, [currentUser, pingHeartbeat]);
+
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // Global keyboard shortcuts
@@ -157,8 +172,10 @@ export default function App() {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       // ? → shortcuts modal
       if (e.key === '?') { setShortcutsOpen(o => !o); return; }
-      // Esc → close shortcuts modal
-      if (e.key === 'Escape') { setShortcutsOpen(false); return; }
+      // Esc → close shortcuts modal / chat
+      if (e.key === 'Escape') { setShortcutsOpen(false); setChatOpen(false); return; }
+      // c → toggle team chat
+      if (e.key === 'c' || e.key === 'C') { setChatOpen(o => !o); return; }
       // 1–9 → jump to screen
       if (e.key in ROUTE_KEYS) { setRoute(ROUTE_KEYS[e.key]); }
     }
@@ -279,6 +296,7 @@ export default function App() {
                 ['⌘ ⇧ R',      'New meeting + record'],
                 ['?',          'This shortcuts modal'],
                 ['Esc',        'Close any modal'],
+                ['C',          'Toggle team chat'],
                 ['1',          'Go to Overview'],
                 ['2',          'Go to Chat'],
                 ['3',          'Go to Project Memory'],
@@ -300,6 +318,15 @@ export default function App() {
         </div>
       )}
     </div>
+      <TeamChat
+        currentUser={currentUser}
+        isOpen={chatOpen}
+        onToggle={() => setChatOpen(o => !o)}
+        onNavigate={(r, id) => {
+          if (r === 'meetings' && id) setSelectedMeetingId(id);
+          setRoute(r);
+        }}
+      />
     </ToastProvider>
   );
 }

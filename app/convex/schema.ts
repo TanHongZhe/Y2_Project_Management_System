@@ -125,9 +125,38 @@ export default defineSchema({
     createdBy: v.string(),
     updatedAt: v.number(),
     audioStorageId: v.optional(v.id("_storage")),
+    source: v.optional(v.union(v.literal("meeting"), v.literal("aria"), v.literal("note"))),
+    sources: v.optional(v.array(v.string())),
+    editedBy: v.optional(v.array(v.string())),
   })
     .index("by_date", ["date"])
     .searchIndex("search_content", { searchField: "content" }),
+
+  chatThreads: defineTable({
+    type: v.union(v.literal("group"), v.literal("dm")),
+    participants: v.array(v.string()),
+    lastMessageAt: v.optional(v.number()),
+    lastAuthorId: v.optional(v.string()),
+    name: v.optional(v.string()),
+  })
+    .index("by_type", ["type"])
+    .index("by_lastMessageAt", ["lastMessageAt"]),
+
+  chatMessages: defineTable({
+    threadId: v.id("chatThreads"),
+    authorId: v.string(),
+    content: v.string(),
+    createdAt: v.number(),
+    mentions: v.optional(v.array(v.string())),
+    ariaTaskNoteId: v.optional(v.id("meetingNotes")),
+  }).index("by_thread", ["threadId", "createdAt"]),
+
+  heartbeats: defineTable({
+    userId: v.string(),
+    lastSeen: v.number(),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_lastSeen", ["lastSeen"]),
 
   notifications: defineTable({
     userId: v.string(),

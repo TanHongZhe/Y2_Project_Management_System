@@ -20,7 +20,9 @@ export const ALL_USER_ID = '__all__';
 const TEAM_HANDLES: MentionHandle[] = USERS
   .filter((u) => !u.isGuest)
   .map((u) => ({
-    handle: u.name.toLowerCase().replace(/\s+/g, ''),
+    // Aria's display name "Aria (AI)" would produce "aria(ai)" which the alpha-only
+    // mention regex can't match. Use the plain id "aria" as the handle instead.
+    handle: u.isAria ? u.id : u.name.toLowerCase().replace(/\s+/g, ''),
     userId: u.id,
     name: u.name,
     initials: u.initials,
@@ -57,7 +59,7 @@ export function extractMentionedUserIds(text: string, currentUserId?: string): s
     if (!uid) continue;
     if (uid === ALL_USER_ID) {
       for (const h of TEAM_HANDLES) {
-        if (h.userId !== currentUserId) found.add(h.userId);
+        if (h.userId !== currentUserId && h.userId !== 'aria') found.add(h.userId);
       }
       continue;
     }
