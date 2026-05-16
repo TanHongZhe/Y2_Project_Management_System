@@ -48,19 +48,26 @@ export const notifyMention = mutation({
   args: {
     userId: v.string(),
     fromUserId: v.string(),
-    linkRoute: v.string(),    // "meetings" | "memory" | "tests" | ...
-    linkId: v.string(),       // doc id used as dedup key
-    contextLabel: v.string(), // human-readable source, e.g. "Meeting 15 May"
+    linkRoute: v.string(),
+    linkId: v.string(),
+    contextLabel: v.string(),
   },
   handler: async (ctx, { userId, fromUserId, linkRoute, linkId, contextLabel }) => {
-    // Idempotent — one mention per (link, user, type) so re-edits don't re-fire.
     const existing = await ctx.db
       .query("notifications")
       .withIndex("by_linkId_userId_type", (q) =>
         q.eq("linkId", linkId).eq("userId", userId).eq("type", "mention"),
       )
       .first();
-    if (existing) return;
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        read: false,
+        createdAt: Date.now(),
+        message: `You were mentioned in "${contextLabel}"`,
+        fromUserId,
+      });
+      return;
+    }
     await ctx.db.insert("notifications", {
       userId,
       type: "mention",
@@ -71,5 +78,57 @@ export const notifyMention = mutation({
       read: false,
       createdAt: Date.now(),
     });
+  },
+});
+
+// Syncs mention notifications to exactly match the current set of @mentions in
+// the editor. Creates for new mentions, deletes for removed ones, and
+// re-surfaces (marks unread) any already-read notifications on re-mention.
+export const syncMentions = mutation({
+  args: {
+    linkId: v.string(),
+    linkRoute: v.string(),
+    contextLabel: v.string(),
+    fromUserId: v.string(),
+    mentionedUserIds: v.array(v.string()),
+  },
+  handler: async (ctx, { linkId, linkRoute, contextLabel, fromUserId, mentionedUserIds }) => {
+    // Fetch all existing mention notifications for this meeting.
+    // Querying with just the first index field (linkId) returns all rows for that link.
+    const allForLink = await ctx.db
+      .query("notifications")
+      .withIndex("by_linkId_userId_type", (q) => q.eq("linkId", linkId))
+      .collect();
+    const existingMentions = allForLink.filter((n) => n.type === "mention");
+
+    const currentSet = new Set(mentionedUserIds);
+    const existingMap = new Map(existingMentions.map((n) => [n.userId, n]));
+
+    // 1. Delete notifications for users who are no longer @mentioned
+    for (const n of existingMentions) {
+      if (!currentSet.has(n.userId)) {
+        await ctx.db.delete(n._id);
+      }
+    }
+
+    // 2. Create or refresh notifications for currently @mentioned users
+    for (const userId of mentionedUserIds) {
+      const existing = existingMap.get(userId);
+      if (!existing) {
+        await ctx.db.insert("notifications", {
+          userId,
+          type: "mention",
+          message: `You were mentioned in "${contextLabel}"`,
+          linkRoute,
+          linkId,
+          fromUserId,
+          read: false,
+          createdAt: Date.now(),
+        });
+      } else if (existing.read) {
+        // Re-surface: mark unread so they notice it again
+        await ctx.db.patch(existing._id, { read: false, createdAt: Date.now() });
+      }
+    }
   },
 });

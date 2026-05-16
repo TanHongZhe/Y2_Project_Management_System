@@ -20,6 +20,9 @@ import { DOMParser as PMDOMParser, Node as PMNode } from '@tiptap/pm/model';
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import { useToast } from '../Toast';
+import { wordCount, relativeTimestamp } from '../../lib/uiUtils';
+import { MEETING_TEMPLATES } from '../../lib/meetingTemplates';
 
 // ProseMirror plugin: paints any `@handle` that matches a known user with an
 // amber class. Pure decoration — never touches the underlying markdown, so the
@@ -77,6 +80,7 @@ interface MeetingsProps {
 
 interface MeetingEditorHandle {
   appendTranscript: (text: string) => void;
+  setContent: (text: string) => void;
 }
 
 function fmtDate(ts: number) {
@@ -114,7 +118,8 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
   const generateAudioUploadUrl = useMutation(api.meetings.generateAudioUploadUrl);
   const saveAudio = useMutation(api.meetings.saveAudio);
   const deleteAudio = useMutation(api.meetings.deleteAudio);
-  const notifyMention = useMutation(api.notifications.notifyMention);
+  const syncMentions = useMutation(api.notifications.syncMentions);
+  const toast = useToast();
 
   const [selectedId, setSelectedId] = useState<Id<"meetingNotes"> | null>(null);
   const [title, setTitle] = useState("");
@@ -123,6 +128,10 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
   const [date, setDate] = useState(Date.now());
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [savedRecently, setSavedRecently] = useState(false);
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string>>(new Set());
+  const pendingDeleteTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Recording
@@ -227,14 +236,21 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
 
   function scheduleSave(patch: Partial<{ title: string; content: string; attendees: string[]; date: number }>) {
     if (!selectedId || readOnly) return;
+    setIsSaving(true);
+    setSavedRecently(false);
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      update({ id: selectedId!, ...patch });
+      void update({ id: selectedId!, ...patch }).then(() => {
+        setIsSaving(false);
+        setSavedRecently(true);
+        setTimeout(() => setSavedRecently(false), 2000);
+      });
     }, 800);
   }
 
-  // Debounced @mention scan — fires notifications 3s after the last keystroke.
-  // Server is idempotent per (meeting, user), so re-firing on every edit is safe.
+  // Debounced @mention sync — fires 1.2s after the last keystroke.
+  // Compares the current set of mentioned users against what's stored and
+  // creates / deletes notifications to keep them in sync.
   function scheduleMentionCheck(md: string) {
     if (!selectedId || readOnly) return;
     if (mentionTimerRef.current) clearTimeout(mentionTimerRef.current);
@@ -242,16 +258,14 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
     const meetingTitle = title;
     mentionTimerRef.current = setTimeout(() => {
       const mentioned = extractMentionedUserIds(md, currentUser.id);
-      for (const userId of mentioned) {
-        void notifyMention({
-          userId,
-          fromUserId: currentUser.id,
-          linkRoute: 'meetings',
-          linkId: meetingId as string,
-          contextLabel: meetingTitle,
-        });
-      }
-    }, 3000);
+      void syncMentions({
+        linkId: meetingId as string,
+        linkRoute: 'meetings',
+        contextLabel: meetingTitle,
+        fromUserId: currentUser.id,
+        mentionedUserIds: mentioned,
+      });
+    }, 1200);
   }
 
   async function handleDeleteAudio() {
@@ -319,10 +333,31 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
     }
   }
 
-  async function handleDelete() {
+  function handleDelete() {
     if (!selectedId) return;
-    await remove({ id: selectedId });
+    const id = selectedId;
+    const label = meetings?.find(m => m._id === id)?.title ?? 'Meeting';
+    // Optimistically hide and schedule real delete
+    setPendingDeleteIds(s => new Set([...s, id as string]));
     setSelectedId(null);
+    const timer = setTimeout(() => {
+      void remove({ id });
+      setPendingDeleteIds(s => { const n = new Set(s); n.delete(id as string); return n; });
+      pendingDeleteTimers.current.delete(id as string);
+    }, 5000);
+    pendingDeleteTimers.current.set(id as string, timer);
+    toast.info(`“${label}” deleted`, {
+      duration: 5000,
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          const t = pendingDeleteTimers.current.get(id as string);
+          if (t) { clearTimeout(t); pendingDeleteTimers.current.delete(id as string); }
+          setPendingDeleteIds(s => { const n = new Set(s); n.delete(id as string); return n; });
+          setSelectedId(id);
+        },
+      },
+    });
   }
 
   function flashRecordBlocked() {
@@ -524,16 +559,25 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
               )}
             </div>
           )}
-          {meetings?.map((m) => (
-            <div
-              key={m._id}
-              className={"meeting-list-item" + (selectedId === m._id ? " active" : "")}
-              onClick={() => setSelectedId(m._id)}
-            >
-              <div className="mli-title">{m.title}</div>
-              <div className="mli-date">{fmtDate(m.date)}</div>
-            </div>
-          ))}
+          {meetings?.filter(m => !pendingDeleteIds.has(m._id)).map((m) => {
+            const now = Date.now();
+            const ago = now - (m.updatedAt ?? m._creationTime ?? 0);
+            const borderColor = ago < 86_400_000 ? 'var(--accent)'
+              : ago < 7 * 86_400_000 ? 'var(--line-strong)' : 'transparent';
+            return (
+              <div
+                key={m._id}
+                className={"meeting-list-item" + (selectedId === m._id ? " active" : "")}
+                onClick={() => setSelectedId(m._id)}
+                style={{ borderLeft: `3px solid ${borderColor}` }}
+              >
+                <div className="mli-title">{m.title}</div>
+                <div className="mli-date">
+                  {m.updatedAt ? relativeTimestamp(m.updatedAt) + ' · ' : ''}{fmtDate(m.date)}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         <div className="meetings-editor">
@@ -554,6 +598,11 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
                   placeholder="Meeting title"
                   onChange={(e) => { setTitle(e.target.value); scheduleSave({ title: e.target.value }); }}
                 />
+                {!readOnly && (
+                  <span className="autosave-indicator" aria-live="polite">
+                    {isSaving ? 'Saving…' : savedRecently ? 'Saved ✓' : ''}
+                  </span>
+                )}
                 <input
                   type="date"
                   className="meeting-date-field"
@@ -616,6 +665,26 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
                 }}
               />
 
+              {/* Template picker — appears for new/empty meetings */}
+              {!readOnly && !content.trim() && (
+                <div className="template-strip">
+                  <span className="template-strip-label">Start from a template:</span>
+                  {MEETING_TEMPLATES.map(t => (
+                    <button
+                      key={t.id}
+                      className="btn ghost sm"
+                      onClick={() => {
+                        setContent(t.content);
+                        editorRef.current?.setContent(t.content);
+                        scheduleSave({ content: t.content });
+                      }}
+                    >
+                      {t.icon} {t.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div className="meeting-footer-row">
                 <div className="meeting-footer-left">
                   {!readOnly && (
@@ -634,6 +703,11 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
                   )}
                 </div>
                 <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  {content.trim() && (
+                    <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+                      {wordCount(content)} words · ~{Math.ceil(wordCount(content) / 200)} min read
+                    </span>
+                  )}
                   {transcribeError && (
                     <span className="meeting-sync-msg error">{transcribeError}</span>
                   )}
@@ -798,6 +872,10 @@ const MeetingEditor = React.forwardRef<MeetingEditorHandle, {
       ];
 
       editor.chain().focus().insertContentAt(editor.state.doc.content.size, jsonNodes).run();
+    },
+    setContent: (text: string) => {
+      if (!editor) return;
+      editor.commands.setContent(text);
     },
   }), [editor]);
 

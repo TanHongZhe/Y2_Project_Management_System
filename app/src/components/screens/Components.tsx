@@ -84,6 +84,20 @@ export default function Components({ readOnly, searchBar }: { readOnly?: boolean
     setSort(s => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : 1 }));
   }
 
+  function exportCSV() {
+    const hdrs = ['Ref','Name','Model','Supplier','Qty','Cost/unit (£)','Total (£)','Status'];
+    const rows = filtered.map(c => [
+      c.ref, c.name, c.model ?? '', c.supplier ?? '', String(c.qty),
+      c.estCost > 0 ? c.estCost.toFixed(2) : '0',
+      (c.estCost * c.qty).toFixed(2), c.status,
+    ]);
+    const csv = [hdrs, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = `bom-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click(); URL.revokeObjectURL(a.href);
+  }
+
   const statusCounts: Record<string, number> = {
     all: list.length,
     installed: list.filter(c => c.status === "installed").length,
@@ -259,6 +273,9 @@ export default function Components({ readOnly, searchBar }: { readOnly?: boolean
         </div>
         <div className="actions">
           {searchBar}
+          <button className="btn sm" onClick={exportCSV} title="Export as CSV">
+            <Icons.Download size={13} /><span>Export CSV</span>
+          </button>
           {!readOnly && (
             <button className="btn primary sm" onClick={() => setShowForm(s => !s)}>
               <Icons.Plus /><span>Add part</span>
@@ -509,14 +526,23 @@ export default function Components({ readOnly, searchBar }: { readOnly?: boolean
                       ) : <span style={{ color: "var(--text-faint)", fontSize: 11 }}>—</span>}
                     </td>
                     <td>
-                      <button
-                        className={"status-chip " + c.status}
-                        onClick={readOnly ? undefined : () => cycleStatus(c._id, c.status)}
-                        style={{ cursor: readOnly ? "default" : "pointer", border: "none" }}
-                        title={readOnly ? undefined : "Click to advance status"}
-                      >
-                        {c.status}
-                      </button>
+                      {(() => {
+                        const order: StatusKey[] = ['planned','ordered','received','installed'];
+                        const idx = order.indexOf(c.status);
+                        return (
+                          <div className="status-flow">
+                            {order.map((s, i) => (
+                              <span key={s} className={`sf-dot${i <= idx ? ' filled' : ''}`} title={s} />
+                            ))}
+                            <button
+                              className={`status-chip ${c.status}`}
+                              onClick={readOnly ? undefined : () => cycleStatus(c._id, c.status)}
+                              style={{ cursor: readOnly ? 'default' : 'pointer', border: 'none', fontSize: 10 }}
+                              title={readOnly ? undefined : 'Click to advance status'}
+                            >{c.status}</button>
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="mono right">
                       {c.estCost > 0 ? `£${c.estCost.toFixed(2)}` : <span style={{ color: "var(--text-faint)" }}>—</span>}

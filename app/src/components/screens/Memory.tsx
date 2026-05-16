@@ -8,6 +8,7 @@ import { renderMarkdown } from '@/lib/markdown';
 import * as Icons from '../Icons';
 import MentionInput from '../MentionInput';
 import { extractMentionedUserIds } from '../../lib/mentions';
+import { relativeTimestamp } from '../../lib/uiUtils';
 
 export default function Memory({ readOnly, searchBar, currentUserId }: { readOnly?: boolean; searchBar?: React.ReactNode; currentUserId?: string }) {
   const notes = useQuery(api.memoryNotes.list, {});
@@ -181,7 +182,7 @@ export default function Memory({ readOnly, searchBar, currentUserId }: { readOnl
               <header>
                 <h2>## {s.section}</h2>
                 <span className="author">{s.author}</span>
-                <span className="updated">updated {new Date(s.updatedAt).toISOString().slice(0, 10)}</span>
+                <span className="updated">updated {relativeTimestamp(s.updatedAt)}</span>
                 {!readOnly && (editingId === s._id ? (
                   <>
                     <button className="btn primary sm edit-btn" onClick={() => commitEdit(s.section)}>

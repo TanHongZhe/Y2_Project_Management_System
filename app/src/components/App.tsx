@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { ToastProvider } from './Toast';
+import { pushRecentRoute } from './CommandPalette';
 import Sidebar from './Sidebar';
 import * as Icons from './Icons';
 import Overview from './screens/Overview';
@@ -91,6 +93,7 @@ export default function App() {
 
   const setRoute = useCallback((r: string) => {
     setRouteState(r);
+    pushRecentRoute(r);
     localStorage.setItem("pms-route", r);
   }, []);
 
@@ -110,28 +113,55 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = tweaks.theme;
+    const resolvedTheme = tweaks.theme === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : tweaks.theme;
+    document.documentElement.dataset.theme = resolvedTheme;
     document.documentElement.dataset.accent = tweaks.accent;
     document.documentElement.dataset.density = tweaks.density;
     document.documentElement.dataset.surface = tweaks.surface;
   }, [tweaks]);
 
-  // Cmd+K / Ctrl+K → command palette; Ctrl+Shift+R → new meeting + record
+  // Follow OS dark/light preference when theme === 'system'
   useEffect(() => {
+    if (tweaks.theme !== 'system') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = () => { document.documentElement.dataset.theme = mq.matches ? 'dark' : 'light'; };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, [tweaks.theme]);
+
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const ROUTE_KEYS: Record<string, string> = {
+      '1': 'overview', '2': 'chat', '3': 'memory', '4': 'meetings',
+      '5': 'images',   '6': 'components', '7': 'tests', '8': 'docs', '9': 'settings',
+    };
     function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
-        setCmdOpen(o => !o);
-      }
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "R") {
+      // Cmd+K → command palette
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setCmdOpen(o => !o); return; }
+      // Ctrl+Shift+R → new meeting + record
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'R') {
         e.preventDefault();
         if (!currentUser || currentUser.isGuest) return;
-        setRoute("meetings");
-        setPendingRecord(true);
+        setRoute('meetings'); setPendingRecord(true); return;
       }
+      // Skip if focus is in an input/textarea/editor
+      const tag = (document.activeElement as HTMLElement)?.tagName ?? '';
+      const ce = (document.activeElement as HTMLElement)?.getAttribute('contenteditable');
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || ce === 'true') return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // ? → shortcuts modal
+      if (e.key === '?') { setShortcutsOpen(o => !o); return; }
+      // Esc → close shortcuts modal
+      if (e.key === 'Escape') { setShortcutsOpen(false); return; }
+      // 1–9 → jump to screen
+      if (e.key in ROUTE_KEYS) { setRoute(ROUTE_KEYS[e.key]); }
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [currentUser, setRoute]);
 
   function handleSelectThread(id: string | null) {
@@ -192,6 +222,7 @@ export default function App() {
   else if (route === "meetings")   screen = <Meetings currentUser={currentUser} readOnly={currentUser.isGuest} searchBar={searchBar} selectedMeetingId={selectedMeetingId ?? undefined} onMeetingConsumed={handleMeetingConsumed} pendingRecord={pendingRecord} onRecordConsumed={handleRecordConsumed} />;
 
   return (
+    <ToastProvider>
     <div className={"app" + (sidebarCollapsed ? " sidebar-collapsed" : "")}>
       <Sidebar
         route={route}
@@ -207,6 +238,8 @@ export default function App() {
       />
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
       <main className="main" data-screen-label={ROUTE_LABELS[route] ?? route}>
+        {/* Top loading bar — re-mounts on route change, plays once */}
+        <div key={`loader-${route}`} className="route-top-loader" aria-hidden />
         <div className="mobile-bar">
           <button className="btn ghost icon-only" onClick={() => setSidebarOpen(true)}>
             <Icons.Menu size={18} />
@@ -216,7 +249,9 @@ export default function App() {
             <Icons.Search />
           </button>
         </div>
-        {screen}
+        <div key={route} className="screen-enter">
+          {screen}
+        </div>
       </main>
       <TweaksPanel tweaks={tweaks} setTweak={setTweak} route={route} setRoute={setRoute} />
       {cmdOpen && (
@@ -224,9 +259,44 @@ export default function App() {
           onClose={() => setCmdOpen(false)}
           onNavigate={(r) => { setRoute(r); setCmdOpen(false); }}
           currentRoute={route}
+          onNewMeeting={() => { setRoute('meetings'); setCmdOpen(false); }}
+          onNewTodo={() => { setRoute('overview'); setCmdOpen(false); }}
         />
       )}
+      {shortcutsOpen && (
+        <div className="shortcuts-overlay" onClick={() => setShortcutsOpen(false)}>
+          <div className="shortcuts-modal" onClick={e => e.stopPropagation()}>
+            <div className="shortcuts-header">
+              <span>Keyboard shortcuts</span>
+              <button className="btn ghost icon-only sm" onClick={() => setShortcutsOpen(false)}>✕</button>
+            </div>
+            <div className="shortcuts-body">
+              {[
+                ['⌘ K',        'Open command palette'],
+                ['⌘ ⇧ R',      'New meeting + record'],
+                ['?',          'This shortcuts modal'],
+                ['Esc',        'Close any modal'],
+                ['1',          'Go to Overview'],
+                ['2',          'Go to Chat'],
+                ['3',          'Go to Project Memory'],
+                ['4',          'Go to Meetings'],
+                ['5',          'Go to Images'],
+                ['6',          'Go to Components'],
+                ['7',          'Go to Test Results'],
+                ['8',          'Go to Docs'],
+                ['9',          'Go to Settings'],
+              ].map(([k, desc]) => (
+                <div key={k} className="shortcut-row">
+                  <span className="shortcut-key">{k}</span>
+                  <span className="shortcut-desc">{desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+    </ToastProvider>
   );
 }
 

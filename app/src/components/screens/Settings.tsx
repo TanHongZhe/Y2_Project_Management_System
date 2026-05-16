@@ -170,6 +170,9 @@ export default function Settings({ tweaks, setTweak, selectedThreadId, searchBar
                 <button className={tweaks.theme === "light" ? "active" : ""} onClick={() => setTweak("theme", "light")}>
                   <Icons.Sun size={10} /> Light
                 </button>
+                <button className={tweaks.theme === "system" ? "active" : ""} onClick={() => setTweak("theme", "system")}>
+                  Auto
+                </button>
                 <button className={tweaks.theme === "dark" ? "active" : ""} onClick={() => setTweak("theme", "dark")}>
                   <Icons.Moon size={10} /> Dark
                 </button>

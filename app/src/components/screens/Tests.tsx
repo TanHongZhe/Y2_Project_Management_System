@@ -48,6 +48,23 @@ export default function Tests({ readOnly, searchBar, currentUserId }: { readOnly
     return map;
   }, [all]);
 
+  const trends = useMemo(() => {
+    const result: Record<string, { symbol: string; color: string }> = {};
+    for (const s of KNOWN_SUBS) {
+      const sub = [...all.filter(t => t.subsystem === s.id && t.result !== 'pending')]
+        .sort((a, b) => a.testedAt - b.testedAt);
+      if (sub.length < 2) { result[s.id] = { symbol: '', color: '' }; continue; }
+      const recent = sub.slice(-3);
+      const older  = sub.slice(-6, -3);
+      const rRate  = recent.filter(t => t.result === 'pass').length / recent.length;
+      const oRate  = older.length ? older.filter(t => t.result === 'pass').length / older.length : rRate;
+      if (rRate > oRate + 0.15)      result[s.id] = { symbol: '↑', color: 'var(--accent)' };
+      else if (rRate < oRate - 0.15) result[s.id] = { symbol: '↓', color: 'var(--danger)' };
+      else                           result[s.id] = { symbol: '=', color: 'var(--text-faint)' };
+    }
+    return result;
+  }, [all]);
+
   async function submit() {
     if (!form.title.trim()) return;
     const metrics = form.metrics
@@ -149,7 +166,14 @@ export default function Tests({ readOnly, searchBar, currentUserId }: { readOnly
                 <div>{s.name}</div>
                 <span className="sub">{s.sub}</span>
               </div>
-              <span className="count">{counts[s.id] ?? 0}</span>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                <span className="count">{counts[s.id] ?? 0}</span>
+                {trends[s.id]?.symbol && (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: trends[s.id].color, lineHeight: 1 }}>
+                    {trends[s.id].symbol}
+                  </span>
+                )}
+              </div>
             </div>
           ))}
         </aside>

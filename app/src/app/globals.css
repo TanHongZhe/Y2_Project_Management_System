@@ -1714,3 +1714,537 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; background: v
 .mention-name { flex: 1; color: var(--text); }
 .mention-you { color: var(--text-faint); font-size: 10.5px; font-style: italic; margin-left: 4px; }
 .mention-handle { font-size: 10.5px; color: var(--text-faint); font-family: var(--font-mono); }
+
+/* ============================================================
+   Motion System — Animations & Micro-interactions
+   All entrance animations, transitions, and interactive feel
+   ============================================================ */
+
+/* ── Keyframes ──────────────────────────────────────────────── */
+
+@keyframes screen-enter {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes card-fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes dropdown-in {
+  from { opacity: 0; transform: scaleY(0.9) translateY(-6px); }
+  to   { opacity: 1; transform: scaleY(1) translateY(0); }
+}
+@keyframes cmd-in {
+  from { opacity: 0; transform: scale(0.94) translateY(-12px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes img-scale-in {
+  from { transform: scale(0.91); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+@keyframes todo-enter {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes check-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(0.78); }
+  70%  { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+@keyframes nav-indicator {
+  from { transform: translateY(-50%) scaleY(0); opacity: 0; }
+  to   { transform: translateY(-50%) scaleY(1); opacity: 1; }
+}
+@keyframes chip-pop {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(0.88); }
+  70%  { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+@keyframes shimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position:  600px 0; }
+}
+@keyframes notif-ping {
+  0%   { box-shadow: 0 0 0 0   var(--danger); }
+  60%  { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0   transparent; }
+}
+@keyframes status-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent); }
+  50%       { box-shadow: 0 0 0 4px transparent; }
+}
+@keyframes float-gentle {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-7px); }
+}
+@keyframes overdue-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.55; }
+}
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes count-bar-fill {
+  from { transform: scaleX(0); transform-origin: left; }
+  to   { transform: scaleX(1); transform-origin: left; }
+}
+
+/* ── Screen / Page transitions ──────────────────────────────── */
+
+.screen-enter {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  animation: screen-enter 0.24s ease-out both;
+}
+
+/* ── Buttons — tactile press & lift ────────────────────────── */
+
+.btn {
+  transition: border-color 0.12s, background 0.12s, color 0.12s,
+              opacity 0.12s, transform 0.1s, box-shadow 0.12s !important;
+}
+.btn:active {
+  transform: scale(0.96) !important;
+}
+.btn.primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+}
+.btn.primary:active {
+  transform: scale(0.96) translateY(0) !important;
+  box-shadow: none !important;
+}
+
+/* ── Navigation items ───────────────────────────────────────── */
+
+.nav-item {
+  transition: background 0.12s, color 0.12s;
+}
+.nav-item.active::before {
+  animation: nav-indicator 0.2s ease-out;
+}
+
+/* ── Cards — hover lift ─────────────────────────────────────── */
+
+.card {
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.card:hover {
+  box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+  transform: translateY(-1px);
+}
+[data-theme="dark"] .card:hover {
+  box-shadow: 0 4px 24px rgba(0,0,0,0.38);
+}
+
+/* ── Chips — toggle pop ─────────────────────────────────────── */
+
+.chip {
+  transition: background 0.12s, color 0.12s, border-color 0.12s, transform 0.1s;
+}
+.chip.active {
+  animation: chip-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.chip:active { transform: scale(0.93); }
+
+/* ── Progress bars — animated fill on mount ─────────────────── */
+
+.countdown-progress span {
+  transition: width 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.budget-bar > span,
+.cost-footer .progress span,
+.cap-bar span,
+.status-bar span {
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Switch — spring knob ───────────────────────────────────── */
+
+.switch .knob {
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+}
+
+/* ── Command palette entrance ───────────────────────────────── */
+
+.cmd-overlay { animation: fade-in 0.18s ease; }
+.cmd-palette { animation: cmd-in 0.22s cubic-bezier(0.34, 1.3, 0.64, 1); }
+
+/* ── Dropdowns & popovers ───────────────────────────────────── */
+
+.apicker-drop,
+.gs-dropdown,
+.notif-dropdown {
+  animation: dropdown-in 0.17s cubic-bezier(0.2, 0, 0, 1);
+  transform-origin: top center;
+}
+
+/* ── Lightbox ───────────────────────────────────────────────── */
+
+.img-lightbox         { animation: fade-in 0.2s ease; }
+.img-lightbox-img     { animation: img-scale-in 0.25s cubic-bezier(0.34, 1.2, 0.64, 1); }
+.img-lightbox-footer  { animation: card-fade-up 0.28s ease-out 0.1s both; }
+
+/* ── Todo items ─────────────────────────────────────────────── */
+
+.todo-item { animation: todo-enter 0.22s ease-out both; }
+.todo-checkbox {
+  transition: background 0.12s, border-color 0.12s, transform 0.1s !important;
+}
+.todo-checkbox:active { transform: scale(0.82); }
+.todo-checkbox.checked { animation: check-pop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+/* Overdue items pulse gently to draw attention */
+.todo-item.overdue .todo-text {
+  animation: overdue-pulse 2.2s ease-in-out infinite;
+  color: var(--danger) !important;
+}
+
+/* ── Login — entrance & card stagger ───────────────────────── */
+
+.login-screen { animation: fade-in 0.32s ease-out; }
+.login-card {
+  animation: card-fade-up 0.36s ease-out both;
+  transition: transform 0.1s ease;
+}
+.login-card:active { transform: scale(0.96) !important; }
+
+/* ── Notification badge — attention ping ────────────────────── */
+
+.notif-badge { animation: notif-ping 2.4s ease-in-out 1.5s infinite; }
+
+/* ── Sidebar status dot — heartbeat ─────────────────────────── */
+
+.sidebar-status-line .dot {
+  animation: status-pulse 2.8s ease-in-out infinite;
+}
+
+/* ── Image gallery — stagger on load ───────────────────────── */
+
+.img-card { animation: card-fade-up 0.3s ease-out both; }
+.img-card:nth-child(2)  { animation-delay: 30ms; }
+.img-card:nth-child(3)  { animation-delay: 60ms; }
+.img-card:nth-child(4)  { animation-delay: 90ms; }
+.img-card:nth-child(5)  { animation-delay: 120ms; }
+.img-card:nth-child(6)  { animation-delay: 150ms; }
+.img-card:nth-child(7)  { animation-delay: 180ms; }
+.img-card:nth-child(8)  { animation-delay: 210ms; }
+.img-card:nth-child(n+9){ animation-delay: 240ms; }
+
+/* Smoother image hover — lift the whole card, not just the inner img */
+.img-card {
+  transition: border-color 0.18s, box-shadow 0.2s, transform 0.2s !important;
+}
+.img-card:hover {
+  transform: translateY(-3px) !important;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.35) !important;
+}
+
+/* ── Empty state — floating icon ────────────────────────────── */
+
+.empty .stamp {
+  animation: float-gentle 3.5s ease-in-out infinite;
+}
+
+/* ── Global search — focus glow ────────────────────────────── */
+
+.gs-field {
+  transition: border-color 0.18s, box-shadow 0.22s, min-width 0.22s ease !important;
+}
+.gs-field-open,
+.gs-field:focus-within {
+  min-width: 400px;
+  box-shadow: 0 0 0 2px var(--accent-soft) !important;
+}
+
+/* ── Meeting list items ─────────────────────────────────────── */
+
+.meeting-list-item { animation: slide-in-right 0.2s ease-out both; }
+.meeting-list-item:nth-child(2) { animation-delay: 30ms; }
+.meeting-list-item:nth-child(3) { animation-delay: 60ms; }
+.meeting-list-item:nth-child(4) { animation-delay: 90ms; }
+.meeting-list-item:nth-child(n+5){ animation-delay: 120ms; }
+
+/* ── Sidebar collapse — smooth width ───────────────────────── */
+
+.app {
+  transition: grid-template-columns 0.22s ease !important;
+}
+
+/* ── Skeleton loading ───────────────────────────────────────── */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-sunk) 25%,
+    var(--line)    50%,
+    var(--bg-sunk) 75%
+  );
+  background-size: 600px 100%;
+  animation: shimmer 1.5s infinite linear;
+  border-radius: var(--r-sm);
+}
+.skeleton-text       { height: 11px; margin-bottom: 8px; }
+.skeleton-text.wide  { width: 80%; }
+.skeleton-text.med   { width: 55%; }
+.skeleton-text.short { width: 30%; }
+.skeleton-block      { height: 72px; }
+.skeleton-title      { height: 18px; width: 45%; margin-bottom: 10px; }
+
+/* ── Focus rings — consistent keyboard nav ──────────────────── */
+
+/* Only apply to non-form elements — inputs, textareas, and selects already have
+   their own focus indicators (border-color accent change) and should not get
+   an additional outline ring on top, which creates a double-border effect. */
+:focus-visible:not(input):not(textarea):not(select):not([contenteditable]) {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+  border-radius: var(--r-sm) !important;
+}
+.btn:focus-visible,
+.nav-item:focus-visible,
+.login-card:focus-visible {
+  outline-offset: 3px !important;
+}
+
+/* ── Data table rows — stagger entrance ─────────────────────── */
+
+.data-table tbody tr { animation: fade-in 0.2s ease-out both; }
+.data-table tbody tr:nth-child(2)  { animation-delay: 20ms; }
+.data-table tbody tr:nth-child(3)  { animation-delay: 40ms; }
+.data-table tbody tr:nth-child(4)  { animation-delay: 60ms; }
+.data-table tbody tr:nth-child(5)  { animation-delay: 80ms; }
+.data-table tbody tr:nth-child(6)  { animation-delay: 100ms; }
+.data-table tbody tr:nth-child(7)  { animation-delay: 120ms; }
+.data-table tbody tr:nth-child(n+8){ animation-delay: 140ms; }
+
+/* ── Subsystem status cards — stagger ───────────────────────── */
+
+.subsys { animation: card-fade-up 0.25s ease-out both; }
+.subsys:nth-child(2) { animation-delay: 40ms; }
+.subsys:nth-child(3) { animation-delay: 80ms; }
+.subsys:nth-child(4) { animation-delay: 120ms; }
+.subsys:nth-child(5) { animation-delay: 160ms; }
+
+/* ── Tooltip animation ──────────────────────────────────────── */
+
+.record-blocked-tip { animation: dropdown-in 0.14s ease-out; }
+
+/* ── Composer focus ring ────────────────────────────────────── */
+
+.composer {
+  transition: border-color 0.18s, box-shadow 0.2s !important;
+}
+.composer:focus-within {
+  box-shadow: 0 0 0 3px var(--accent-soft) !important;
+}
+
+/* ── Slide dots — active pulse ──────────────────────────────── */
+
+.slide-dot.active {
+  animation: status-pulse 2.5s ease-in-out infinite;
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.3);
+}
+
+/* ── Reduce motion — respect user preference ────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   FEATURE ADDITIONS — Polish batch (May 2026)
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── #23 Route top loader ──────────────────────────────────── */
+.route-top-loader {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--accent);
+  transform-origin: left;
+  animation: rtl-anim 600ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  pointer-events: none;
+  z-index: 200;
+}
+@keyframes rtl-anim {
+  from { transform: scaleX(0); opacity: 1; }
+  70%  { transform: scaleX(0.85); opacity: 1; }
+  to   { transform: scaleX(1); opacity: 0; }
+}
+
+/* ── #1 Toast system ────────────────────────────────────────── */
+.toast-region {
+  position: fixed;
+  bottom: 24px; right: 24px;
+  display: flex; flex-direction: column; gap: 8px;
+  z-index: 9000;
+  pointer-events: none;
+}
+.toast {
+  display: flex; align-items: center; gap: 10px;
+  min-width: 280px; max-width: 420px;
+  padding: 11px 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+  font-size: 13px;
+  pointer-events: all;
+  animation: toast-in 220ms cubic-bezier(0.34,1.56,0.64,1) both;
+}
+.toast.toast-exit { animation: toast-out 220ms ease forwards; }
+@keyframes toast-in  { from { opacity:0; transform:translateY(12px) scale(0.95); } to { opacity:1; transform:none; } }
+@keyframes toast-out { from { opacity:1; transform:none; } to { opacity:0; transform:translateY(8px) scale(0.96); } }
+.toast-icon {
+  width: 18px; height: 18px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; flex-shrink: 0;
+}
+.toast-success .toast-icon { background: var(--accent); color: #fff; }
+.toast-error   .toast-icon { background: var(--danger);  color: #fff; }
+.toast-info    .toast-icon { background: var(--bg-sunk); color: var(--text-muted); border: 1px solid var(--line); }
+.toast-warning .toast-icon { background: var(--warn);    color: #fff; }
+.toast-msg  { flex: 1; color: var(--text); }
+.toast-action-btn {
+  padding: 3px 8px; border-radius: 4px; border: 1px solid var(--line);
+  background: var(--bg-sunk); color: var(--accent); font-size: 11.5px;
+  font-weight: 600; cursor: pointer; flex-shrink: 0;
+  transition: background 140ms;
+}
+.toast-action-btn:hover { background: var(--accent-soft); }
+.toast-close-btn {
+  padding: 2px 5px; border: none; background: none;
+  color: var(--text-faint); cursor: pointer; font-size: 11px;
+  flex-shrink: 0; opacity: 0.6; transition: opacity 140ms;
+}
+.toast-close-btn:hover { opacity: 1; }
+
+/* ── #12 Keyboard shortcuts modal ──────────────────────────── */
+.shortcuts-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.45);
+  backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 8000;
+  animation: fade-in 150ms ease both;
+}
+.shortcuts-modal {
+  background: var(--bg-elev);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  width: 380px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.28);
+  overflow: hidden;
+  animation: modal-in 200ms cubic-bezier(0.34,1.4,0.64,1) both;
+}
+@keyframes modal-in { from { opacity:0; transform:scale(0.93); } to { opacity:1; transform:none; } }
+.shortcuts-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px; font-weight: 600;
+}
+.shortcuts-body { padding: 8px 6px 10px; }
+.shortcut-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 7px 10px; border-radius: 6px;
+  transition: background 100ms;
+}
+.shortcut-row:hover { background: var(--bg-sunk); }
+.shortcut-key {
+  font-family: var(--font-mono); font-size: 11px;
+  background: var(--bg-sunk); border: 1px solid var(--line);
+  border-radius: 4px; padding: 2px 7px;
+  color: var(--text-muted); min-width: 56px; text-align: center;
+}
+.shortcut-desc { font-size: 12.5px; color: var(--text-muted); }
+
+/* ── #2 Autosave indicator ─────────────────────────────────── */
+.autosave-indicator {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+  white-space: nowrap;
+  padding: 0 8px;
+  transition: opacity 400ms;
+  animation: fade-in 200ms ease;
+}
+
+/* ── #17 Test sparkline dots ───────────────────────────────── */
+.sparkline {
+  display: flex; gap: 3px; align-items: center;
+  margin-top: 4px; flex-wrap: wrap;
+}
+.spark-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  flex-shrink: 0;
+  transition: transform 150ms;
+}
+.spark-dot:hover { transform: scale(1.4); }
+
+/* ── #7 Todo due-date badge ────────────────────────────────── */
+.todo-due-badge {
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ── #26 Component status flow dots ─────────────────────────── */
+.status-flow {
+  display: flex; align-items: center; gap: 5px; flex-wrap: nowrap;
+}
+.sf-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--line-strong);
+  flex-shrink: 0;
+  position: relative; transition: background 200ms;
+}
+.sf-dot.filled { background: var(--accent); }
+.sf-dot:not(:last-child)::after {
+  content: '';
+  position: absolute; top: 50%; right: -6px;
+  width: 5px; height: 1px;
+  background: var(--line-strong);
+  transform: translateY(-50%);
+}
+
+/* ── #30 Meeting template strip ────────────────────────────── */
+.template-strip {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 10px 14px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  margin: 0 0 12px;
+  background: var(--bg-sunk);
+  animation: fade-in 200ms ease both;
+}
+.template-strip-label {
+  font-size: 11.5px; color: var(--text-faint);
+  font-family: var(--font-mono); white-space: nowrap;
+}
+
+/* ── Drag ghost for todo reorder ─────────────────────────────── */
+.todo-item[draggable="true"] { cursor: grab; }
+.todo-item[draggable="true"]:active { cursor: grabbing; opacity: 0.7; }

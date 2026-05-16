@@ -46,8 +46,13 @@ export default function Login({ onSelect }: LoginProps) {
             <p className="login-sub">Solar Bus Demonstrator · ENG2-SYS · Spring 26</p>
           </div>
           <div className="login-grid">
-            {teamUsers.map(user => (
-              <button key={user.id} className="login-card" onClick={() => onSelect(user)}>
+            {teamUsers.map((user, i) => (
+              <button
+                key={user.id}
+                className="login-card"
+                style={{ animationDelay: `${i * 55}ms` }}
+                onClick={() => onSelect(user)}
+              >
                 <UserAvatar user={user} />
                 <span className="login-name">{user.name}</span>
               </button>

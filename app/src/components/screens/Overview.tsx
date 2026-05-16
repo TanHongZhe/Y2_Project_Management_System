@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import * as Icons from '../Icons';
 import { USERS, AppUser } from '../../lib/users';
+import { greeting, relativeDate } from '../../lib/uiUtils';
 
 interface OverviewProps {
   setRoute: (r: string) => void;
@@ -29,26 +30,70 @@ function relativeTime(ts: number): string {
   return new Date(ts).toISOString().slice(0, 10);
 }
 
+function useCountUp(target: number, duration = 700): number {
+  const [value, setValue] = useState(0);
+  useEffect(() => {
+    if (target === 0) { setValue(0); return; }
+    const start = performance.now();
+    let raf: number;
+    function tick(now: number) {
+      const t = Math.min((now - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setValue(Math.round(eased * target));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    }
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+  return value;
+}
+
+function AnimatedNumber({ value }: { value: number }) {
+  const display = useCountUp(value);
+  return <>{display}</>;
+}
+
+function useAnimatedWidth(target: number): number {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    // Double RAF ensures first paint at 0, then transitions to target
+    const id1 = requestAnimationFrame(() => {
+      const id2 = requestAnimationFrame(() => setWidth(target));
+      return () => cancelAnimationFrame(id2);
+    });
+    return () => cancelAnimationFrame(id1);
+  }, [target]);
+  return width;
+}
+
 function DonutChart({ pct, size = 120, stroke = 18 }: { pct: number; size?: number; stroke?: number }) {
   const r = (size - stroke) / 2;
   const cx = size / 2;
   const cy = size / 2;
   const circ = 2 * Math.PI * r;
-  const filled = Math.min(Math.max(pct, 0), 1) * circ;
+  const finalOffset = circ * (1 - Math.min(Math.max(pct, 0), 1));
+  const [dashOffset, setDashOffset] = useState(circ);
+  useEffect(() => {
+    const id1 = requestAnimationFrame(() => {
+      const id2 = requestAnimationFrame(() => setDashOffset(finalOffset));
+      return () => cancelAnimationFrame(id2);
+    });
+    return () => cancelAnimationFrame(id1);
+  }, [finalOffset]);
   const color = pct > 0.9 ? "var(--danger)" : pct > 0.7 ? "var(--warn)" : "var(--accent)";
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: "rotate(-90deg)", display: "block" }}>
       <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--bg-sunk)" strokeWidth={stroke} />
-      {filled > 0 && (
-        <circle
-          cx={cx} cy={cy} r={r}
-          fill="none"
-          stroke={color}
-          strokeWidth={stroke}
-          strokeDasharray={`${filled} ${circ - filled}`}
-          strokeLinecap="butt"
-        />
-      )}
+      <circle
+        cx={cx} cy={cy} r={r}
+        fill="none"
+        stroke={color}
+        strokeWidth={stroke}
+        strokeDasharray={circ}
+        strokeDashoffset={dashOffset}
+        strokeLinecap="butt"
+        style={{ transition: 'stroke-dashoffset 1s cubic-bezier(0.4, 0, 0.2, 1)' }}
+      />
     </svg>
   );
 }
@@ -157,8 +202,40 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
     return () => clearInterval(t);
   }, [slides.length]);
 
+  const recentTests = useQuery(api.tests.list, { limit: 20 });
+
   const [newTodo, setNewTodo] = useState("");
-  const [myTodosOnly, setMyTodosOnly] = useState(false);
+  const [myTodosOnly, setMyTodosOnly] = useState(() => {
+    try { return localStorage.getItem('pms-filter-mine') === 'true'; } catch { return false; }
+  });
+  const toggleMine = () => setMyTodosOnly(v => {
+    try { localStorage.setItem('pms-filter-mine', String(!v)); } catch {}
+    return !v;
+  });
+
+  // Drag-to-reorder todos (localStorage persistence)
+  const [dragOrder, setDragOrder] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('pms-todo-order') ?? '[]'); } catch { return []; }
+  });
+  const dragIdRef = useRef<string | null>(null);
+
+  function handleTodoDragStart(e: React.DragEvent, id: string) {
+    dragIdRef.current = id;
+    e.dataTransfer.effectAllowed = 'move';
+  }
+  function handleTodoDragOver(e: React.DragEvent, overId: string) {
+    e.preventDefault();
+    const fromId = dragIdRef.current;
+    if (!fromId || fromId === overId) return;
+    const active = sortedTodos.filter(t => !t.done).map(t => t._id as string);
+    const fi = active.indexOf(fromId), ti = active.indexOf(overId);
+    if (fi === -1 || ti === -1) return;
+    const next = [...active];
+    next.splice(fi, 1); next.splice(ti, 0, fromId);
+    setDragOrder(next);
+    try { localStorage.setItem('pms-todo-order', JSON.stringify(next)); } catch {}
+  }
+  function handleTodoDragEnd() { dragIdRef.current = null; }
 
   const now = Date.now();
   const daysLeft = Math.max(0, Math.ceil((DEMO_DAY - now) / (1000 * 60 * 60 * 24)));
@@ -192,10 +269,16 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
       // Done tasks always sink to the bottom
       if (a.done && !b.done) return 1;
       if (!a.done && b.done) return -1;
-      // Important items pinned to the top within each group
+      // Overdue first
+      const now = Date.now();
+      const aOver = !a.done && !!a.dueDate && a.dueDate < now;
+      const bOver = !b.done && !!b.dueDate && b.dueDate < now;
+      if (aOver && !bOver) return -1;
+      if (!aOver && bOver) return 1;
+      // Important items next
       if (a.important && !b.important) return -1;
       if (!a.important && b.important) return 1;
-      // Within same group, sort by due date
+      // Due date ascending
       const aHas = !!a.dueDate, bHas = !!b.dueDate;
       if (aHas && !bHas) return -1;
       if (!aHas && bHas) return 1;
@@ -203,6 +286,31 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
       return 0;
     });
   }, [todos, myTodosOnly, currentUser.id]);
+
+  // Apply drag order to active (non-done) todos
+  const displayTodos = useMemo(() => {
+    if (!dragOrder.length) return sortedTodos;
+    const done = sortedTodos.filter(t => t.done);
+    const active = sortedTodos.filter(t => !t.done);
+    const orderMap = new Map(dragOrder.map((id, i) => [id, i]));
+    const sorted = [...active].sort((a, b) => {
+      const ai = orderMap.has(a._id) ? orderMap.get(a._id)! : Infinity;
+      const bi = orderMap.has(b._id) ? orderMap.get(b._id)! : Infinity;
+      return ai - bi;
+    });
+    return [...sorted, ...done];
+  }, [sortedTodos, dragOrder]);
+
+  // Test sparkline data
+  const sparklineTests = useMemo(() => {
+    if (!recentTests) return [];
+    return [...recentTests].sort((a, b) => a.testedAt - b.testedAt).slice(-10);
+  }, [recentTests]);
+
+  const animatedElapsed = useAnimatedWidth(elapsed * 100);
+  const animatedBudgetPct = useAnimatedWidth(
+    stats ? Math.min(1, stats.budget.pct) * 100 : 0
+  );
 
   if (!stats) {
     return (
@@ -214,7 +322,17 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
           </div>
         </header>
         <div className="body">
-          <div style={{ padding: 40, color: "var(--text-muted)" }}>Loading…</div>
+          <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 16 }}>
+            <div className="skeleton skeleton-title" />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+              {[1,2,3].map(i => (
+                <div key={i} style={{ display: "flex", flexDirection: "column", gap: 10, padding: 16, border: "1px solid var(--line)", borderRadius: 6 }}>
+                  <div className="skeleton skeleton-text short" />
+                  <div className="skeleton skeleton-block" />
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </>
     );
@@ -223,14 +341,15 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
   const { counts, budget, recentActivity } = stats;
   const doneCount = todos ? todos.filter((t: { done: boolean }) => t.done).length : 0;
   const totalCount = todos ? todos.length : 0;
-  const visibleCount = sortedTodos.length;
+  const visibleCount = displayTodos.length;
 
   return (
     <>
       <header className="screen-header">
         <div className="title-block">
           <div className="crumb">Workspace · Overview</div>
-          <h1>{PROJECT_NAME}</h1>
+          <h1 style={{ fontSize: 18 }}>{greeting(currentUser.name.split(' ')[0])}</h1>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{PROJECT_NAME}</div>
         </div>
         <div className="actions">
           {searchBar}
@@ -256,7 +375,7 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
                 <div className="countdown-unit">days remaining</div>
                 <div className="countdown-event">18 June 2026 · ENG2-SYS</div>
                 <div className="countdown-progress" style={{ marginTop: 16 }}>
-                  <span style={{ width: `${elapsed * 100}%` }} />
+                  <span style={{ width: `${animatedElapsed}%` }} />
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5 }}>
                   <span className="micro">May 2026</span>
@@ -303,19 +422,31 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
               <div className="stat-mini-row">
                 <div className="stat-mini">
                   <div className="l">Tests</div>
-                  <div className="v">{counts.tests}</div>
+                  <div className="v"><AnimatedNumber value={counts.tests} /></div>
+                  {sparklineTests.length > 0 && (
+                    <div className="sparkline" title="Recent test results (pass/fail)">
+                      {sparklineTests.map((t, i) => (
+                        <span
+                          key={i}
+                          className="spark-dot"
+                          style={{ background: t.result === 'pass' ? 'var(--accent)' : t.result === 'fail' ? 'var(--danger)' : 'var(--text-faint)' }}
+                          title={`${t.result} — ${new Date(t.testedAt).toLocaleDateString()}`}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="stat-mini">
                   <div className="l">Docs</div>
-                  <div className="v">{counts.documents}</div>
+                  <div className="v"><AnimatedNumber value={counts.documents} /></div>
                 </div>
                 <div className="stat-mini">
                   <div className="l">Parts</div>
-                  <div className="v">{counts.components}</div>
+                  <div className="v"><AnimatedNumber value={counts.components} /></div>
                 </div>
                 <div className="stat-mini">
                   <div className="l">Memory</div>
-                  <div className="v">{counts.memoryNotes}</div>
+                  <div className="v"><AnimatedNumber value={counts.memoryNotes} /></div>
                 </div>
               </div>
             </div>
@@ -326,7 +457,7 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
                 <h3>Team Todo</h3>
                 <button
                   className={"chip sm" + (myTodosOnly ? " active" : "")}
-                  onClick={() => setMyTodosOnly(v => !v)}
+                  onClick={toggleMine}
                   style={{ marginLeft: 10, fontSize: 11 }}
                   title="Show only tasks assigned to me"
                 >
@@ -348,13 +479,18 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
                     No tasks assigned to you.
                   </div>
                 ) : (
-                  sortedTodos.map((todo) => {
-                    const dueDateValue = todo.dueDate
-                      ? new Date(todo.dueDate).toISOString().slice(0, 10)
-                      : "";
-                    const isOverdue = todo.dueDate && !todo.done && todo.dueDate < Date.now();
+                  displayTodos.map((todo) => {
+                    const rd = todo.dueDate ? relativeDate(todo.dueDate) : null;
+                    const isOverdue = !!rd?.isOverdue && !todo.done;
                     return (
-                      <div key={todo._id} className={`todo-item${todo.important ? " important" : ""}`}>
+                      <div
+                        key={todo._id}
+                        className={`todo-item${todo.important ? " important" : ""}${isOverdue ? " overdue" : ""}`}
+                        draggable={!todo.done && !currentUser.isGuest}
+                        onDragStart={e => handleTodoDragStart(e, todo._id)}
+                        onDragOver={e => handleTodoDragOver(e, todo._id)}
+                        onDragEnd={handleTodoDragEnd}
+                        style={{ cursor: todo.done || currentUser.isGuest ? undefined : 'grab' }}>
                         <div
                           className={`todo-checkbox${todo.done ? " checked" : ""}`}
                           onClick={currentUser.isGuest ? undefined : () => toggleTodo({ id: todo._id })}
@@ -371,29 +507,14 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
                             />
                           )}
                         </div>
-                        {dueDateValue && (
-                          <input
-                            type="date"
-                            value={dueDateValue}
-                            readOnly={currentUser.isGuest}
-                            onChange={currentUser.isGuest ? undefined : e => {
-                              const val = e.target.value;
-                              setDueDate({ id: todo._id, dueDate: val ? new Date(val).getTime() : undefined });
-                            }}
-                            title="Due date"
-                            style={{
-                              background: "none",
-                              border: "1px solid var(--line)",
-                              borderRadius: "var(--r-sm)",
-                              color: isOverdue ? "var(--danger)" : dueDateValue ? "var(--text-muted)" : "var(--text-faint)",
-                              fontFamily: "var(--font-mono)",
-                              fontSize: 11,
-                              padding: "2px 6px",
-                              cursor: currentUser.isGuest ? "default" : "pointer",
-                              flexShrink: 0,
-                              colorScheme: "dark",
-                            }}
-                          />
+                        {rd && (
+                          <span
+                            className="todo-due-badge"
+                            style={{ color: rd.isOverdue ? 'var(--danger)' : rd.isSoon ? 'var(--accent)' : 'var(--text-muted)' }}
+                            title={todo.dueDate ? new Date(todo.dueDate).toLocaleDateString('en-GB') : ''}
+                          >
+                            {rd.text}
+                          </span>
                         )}
                         {!currentUser.isGuest && (
                           <button
@@ -424,13 +545,23 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
               </div>
               {!currentUser.isGuest && (
                 <div className="todo-add-row">
-                  <input
-                    className="todo-add-input"
-                    placeholder="Add a task and press Enter…"
-                    value={newTodo}
-                    onChange={e => setNewTodo(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && handleAddTodo()}
-                  />
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <input
+                      className="todo-add-input"
+                      placeholder="Add a task and press Enter…"
+                      value={newTodo}
+                      maxLength={150}
+                      onChange={e => setNewTodo(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && handleAddTodo()}
+                    />
+                    {newTodo.length > 60 && (
+                      <span style={{
+                        position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                        fontSize: 10, color: newTodo.length > 120 ? 'var(--danger)' : 'var(--text-faint)',
+                        pointerEvents: 'none',
+                      }}>{newTodo.length}/150</span>
+                    )}
+                  </div>
                   <button className="btn sm" onClick={handleAddTodo} disabled={!newTodo.trim()}>
                     <Icons.Plus size={11} /><span>Add</span>
                   </button>

@@ -174,6 +174,7 @@ export default function Images({ currentUser, searchBar }: ImagesProps) {
   const updateImage = useMutation(api.progressImages.update);
 
   const [filter, setFilter] = useState("all");
+  const [dateRange, setDateRange] = useState<7 | 30 | 0>(0); // 0 = all time
   const [dragOver, setDragOver] = useState(false);
   const [uploadStatus, setUploadStatus] = useState("");
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
@@ -182,9 +183,11 @@ export default function Images({ currentUser, searchBar }: ImagesProps) {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const filtered = (images ?? []).filter(img =>
-    filter === "all" || (img.category ?? "General") === filter
-  );
+  const filtered = (images ?? []).filter(img => {
+    if (filter !== "all" && (img.category ?? "General") !== filter) return false;
+    if (dateRange > 0 && img.uploadedAt < Date.now() - dateRange * 86_400_000) return false;
+    return true;
+  });
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
     const arr = Array.from(files).filter(f =>
@@ -273,7 +276,7 @@ export default function Images({ currentUser, searchBar }: ImagesProps) {
         />
       )}
 
-      {/* Category filter */}
+      {/* Category + date-range filters */}
       <div className="img-filter-bar">
         <button className={"chip" + (filter === "all" ? " active" : "")} onClick={() => setFilter("all")}>
           All <span style={{ opacity: 0.5, marginLeft: 4 }}>{(images ?? []).length}</span>
@@ -287,6 +290,12 @@ export default function Images({ currentUser, searchBar }: ImagesProps) {
             </button>
           );
         })}
+        <div style={{ width: 1, background: 'var(--line)', margin: '0 4px', alignSelf: 'stretch' }} />
+        {([7, 30, 0] as const).map(d => (
+          <button key={d} className={"chip" + (dateRange === d ? " active" : "")} onClick={() => setDateRange(d)}>
+            {d === 0 ? 'All time' : d === 7 ? 'Last 7d' : 'Last 30d'}
+          </button>
+        ))}
       </div>
 
       {uploadStatus && <div className="img-upload-status">{uploadStatus}</div>}
