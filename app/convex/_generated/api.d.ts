@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as calendarEvents from "../calendarEvents.js";
 import type * as chunks from "../chunks.js";
 import type * as components_ from "../components.js";
 import type * as crons from "../crons.js";
@@ -33,6 +34,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  calendarEvents: typeof calendarEvents;
   chunks: typeof chunks;
   components: typeof components_;
   crons: typeof crons;

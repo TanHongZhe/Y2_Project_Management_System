@@ -173,6 +173,61 @@ function AssigneePicker({
   );
 }
 
+function EditableTodoText({ todo, setText }: { todo: any, setText: any }) {
+  const [val, setVal] = useState(todo.text);
+  useEffect(() => setVal(todo.text), [todo.text]);
+
+  return (
+    <input
+      className={`todo-text${todo.done ? " done" : ""}`}
+      value={val}
+      onChange={e => setVal(e.target.value)}
+      onBlur={() => { if (val.trim() !== todo.text && val.trim().length > 0) setText({ id: todo._id, text: val.trim() }) }}
+      onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur() }}
+      style={{
+        background: 'transparent',
+        border: 'none',
+        color: 'inherit',
+        font: 'inherit',
+        width: '100%',
+        outline: 'none',
+        padding: 0,
+        margin: 0
+      }}
+    />
+  );
+}
+
+function EditableTodoDetails({ todo, setDetails }: { todo: any, setDetails: any }) {
+  const [val, setVal] = useState(todo.details || "");
+  useEffect(() => setVal(todo.details || ""), [todo.details]);
+
+  return (
+    <textarea
+      className="todo-details-input"
+      value={val}
+      placeholder="Add more details..."
+      onChange={e => setVal(e.target.value)}
+      onBlur={() => { if (val.trim() !== (todo.details || "")) setDetails({ id: todo._id, details: val.trim() }) }}
+      style={{
+        minHeight: '56px',
+        background: 'var(--bg)',
+        border: '1px solid var(--line)',
+        borderRadius: 'var(--r-md)',
+        padding: '8px 10px',
+        font: 'inherit',
+        fontSize: '12px',
+        color: 'var(--text)',
+        resize: 'vertical',
+        outline: 'none',
+        marginTop: '8px',
+        marginLeft: '26px',
+        width: 'calc(100% - 26px)'
+      }}
+    />
+  );
+}
+
 export default function Overview({ setRoute, currentUser, searchBar }: OverviewProps) {
   const stats = useQuery(api.overview.stats, {});
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -189,6 +244,10 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
   const setDueDate = useMutation((api as any).todos.setDueDate);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const setImportant = useMutation((api as any).todos.setImportant);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const setText = useMutation((api as any).todos.setText);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const setDetails = useMutation((api as any).todos.setDetails);
 
   const recentImages = useQuery(api.progressImages.listWithUrls, {});
   const slides = React.useMemo(
@@ -205,37 +264,18 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
   const recentTests = useQuery(api.tests.list, { limit: 20 });
 
   const [newTodo, setNewTodo] = useState("");
+  const [newDetails, setNewDetails] = useState("");
+  const [newDueDate, setNewDueDate] = useState("");
   const [myTodosOnly, setMyTodosOnly] = useState(() => {
     try { return localStorage.getItem('pms-filter-mine') === 'true'; } catch { return false; }
   });
   const toggleMine = () => setMyTodosOnly(v => {
-    try { localStorage.setItem('pms-filter-mine', String(!v)); } catch {}
+    try { localStorage.setItem('pms-filter-mine', String(!v)); } catch { }
     return !v;
   });
 
-  // Drag-to-reorder todos (localStorage persistence)
-  const [dragOrder, setDragOrder] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem('pms-todo-order') ?? '[]'); } catch { return []; }
-  });
-  const dragIdRef = useRef<string | null>(null);
-
-  function handleTodoDragStart(e: React.DragEvent, id: string) {
-    dragIdRef.current = id;
-    e.dataTransfer.effectAllowed = 'move';
-  }
-  function handleTodoDragOver(e: React.DragEvent, overId: string) {
-    e.preventDefault();
-    const fromId = dragIdRef.current;
-    if (!fromId || fromId === overId) return;
-    const active = sortedTodos.filter(t => !t.done).map(t => t._id as string);
-    const fi = active.indexOf(fromId), ti = active.indexOf(overId);
-    if (fi === -1 || ti === -1) return;
-    const next = [...active];
-    next.splice(fi, 1); next.splice(ti, 0, fromId);
-    setDragOrder(next);
-    try { localStorage.setItem('pms-todo-order', JSON.stringify(next)); } catch {}
-  }
-  function handleTodoDragEnd() { dragIdRef.current = null; }
+  const [expandedTodos, setExpandedTodos] = useState<Record<string, boolean>>({});
+  const toggleExpand = (id: string) => setExpandedTodos(prev => ({ ...prev, [id]: !prev[id] }));
 
   const now = Date.now();
   const daysLeft = Math.max(0, Math.ceil((DEMO_DAY - now) / (1000 * 60 * 60 * 24)));
@@ -245,7 +285,11 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
     const text = newTodo.trim();
     if (!text) return;
     setNewTodo("");
-    await addTodo({ text });
+    const dueDate = newDueDate ? new Date(newDueDate).getTime() : undefined;
+    setNewDueDate("");
+    const details = newDetails.trim();
+    setNewDetails("");
+    await addTodo({ text, dueDate, details });
   };
 
   const handleToggleAssignee = async (
@@ -267,39 +311,18 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
     if (myTodosOnly) list = list.filter((t: TodoItem) => t.assignedTo.includes(currentUser.id));
     return list.sort((a, b) => {
       // Done tasks always sink to the bottom
-      if (a.done && !b.done) return 1;
-      if (!a.done && b.done) return -1;
-      // Overdue first
-      const now = Date.now();
-      const aOver = !a.done && !!a.dueDate && a.dueDate < now;
-      const bOver = !b.done && !!b.dueDate && b.dueDate < now;
-      if (aOver && !bOver) return -1;
-      if (!aOver && bOver) return 1;
+      if (a.done !== b.done) return a.done ? 1 : -1;
       // Important items next
-      if (a.important && !b.important) return -1;
-      if (!a.important && b.important) return 1;
+      if (a.important !== b.important) return a.important ? -1 : 1;
       // Due date ascending
-      const aHas = !!a.dueDate, bHas = !!b.dueDate;
-      if (aHas && !bHas) return -1;
-      if (!aHas && bHas) return 1;
-      if (aHas && bHas && a.dueDate !== b.dueDate) return a.dueDate! - b.dueDate!;
+      const aTime = a.dueDate ?? Infinity;
+      const bTime = b.dueDate ?? Infinity;
+      if (aTime !== bTime) return aTime - bTime;
       return 0;
     });
   }, [todos, myTodosOnly, currentUser.id]);
 
-  // Apply drag order to active (non-done) todos
-  const displayTodos = useMemo(() => {
-    if (!dragOrder.length) return sortedTodos;
-    const done = sortedTodos.filter(t => t.done);
-    const active = sortedTodos.filter(t => !t.done);
-    const orderMap = new Map(dragOrder.map((id, i) => [id, i]));
-    const sorted = [...active].sort((a, b) => {
-      const ai = orderMap.has(a._id) ? orderMap.get(a._id)! : Infinity;
-      const bi = orderMap.has(b._id) ? orderMap.get(b._id)! : Infinity;
-      return ai - bi;
-    });
-    return [...sorted, ...done];
-  }, [sortedTodos, dragOrder]);
+  const displayTodos = sortedTodos;
 
   // Test sparkline data
   const sparklineTests = useMemo(() => {
@@ -325,7 +348,7 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
           <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 16 }}>
             <div className="skeleton skeleton-title" />
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
-              {[1,2,3].map(i => (
+              {[1, 2, 3].map(i => (
                 <div key={i} style={{ display: "flex", flexDirection: "column", gap: 10, padding: 16, border: "1px solid var(--line)", borderRadius: 6 }}>
                   <div className="skeleton skeleton-text short" />
                   <div className="skeleton skeleton-block" />
@@ -348,7 +371,7 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
       <header className="screen-header">
         <div className="title-block">
           <div className="crumb">Workspace · Overview</div>
-          <h1 style={{ fontSize: 18 }}>{greeting(currentUser.name.split(' ')[0])}</h1>
+          <h1 style={{ fontSize: 18 }}>{greeting(currentUser.name)}</h1>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{PROJECT_NAME}</div>
         </div>
         <div className="actions">
@@ -486,57 +509,84 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
                       <div
                         key={todo._id}
                         className={`todo-item${todo.important ? " important" : ""}${isOverdue ? " overdue" : ""}`}
-                        draggable={!todo.done && !currentUser.isGuest}
-                        onDragStart={e => handleTodoDragStart(e, todo._id)}
-                        onDragOver={e => handleTodoDragOver(e, todo._id)}
-                        onDragEnd={handleTodoDragEnd}
-                        style={{ cursor: todo.done || currentUser.isGuest ? undefined : 'grab' }}>
-                        <div
-                          className={`todo-checkbox${todo.done ? " checked" : ""}`}
-                          onClick={currentUser.isGuest ? undefined : () => toggleTodo({ id: todo._id })}
-                          style={currentUser.isGuest ? { cursor: "default" } : undefined}
-                        >
-                          {todo.done && <Icons.Check size={10} stroke="#fff" sw={2.5} />}
-                        </div>
-                        <div className="todo-body">
-                          <div className={`todo-text${todo.done ? " done" : ""}`}>{todo.text}</div>
+                        style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', width: '100%', gap: '10px' }}>
+                          <div
+                            className={`todo-checkbox${todo.done ? " checked" : ""}`}
+                            onClick={currentUser.isGuest ? undefined : () => toggleTodo({ id: todo._id })}
+                            style={currentUser.isGuest ? { cursor: "default" } : undefined}
+                          >
+                            {todo.done && <Icons.Check size={10} stroke="#fff" sw={2.5} />}
+                          </div>
+                          <div className="todo-body" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                            <EditableTodoText todo={todo} setText={setText} />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                              {!currentUser.isGuest && (
+                                <AssigneePicker
+                                  assignedTo={todo.assignedTo}
+                                  onToggle={(uid) => handleToggleAssignee(todo._id, todo.assignedTo, uid)}
+                                />
+                              )}
+                              <button
+                                className="btn ghost sm"
+                                onClick={() => toggleExpand(todo._id)}
+                                style={{ padding: '0 4px', fontSize: '10px', height: '18px' }}
+                              >
+                                {expandedTodos[todo._id] ? 'Hide details' : 'Show details'}
+                              </button>
+                            </div>
+                          </div>
+                          {!todo.done && (
+                            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                              <span
+                                className="todo-due-badge"
+                                style={{ color: rd?.isOverdue ? 'var(--danger)' : rd?.isSoon ? 'var(--accent)' : 'var(--text-muted)' }}
+                                title={todo.dueDate ? new Date(todo.dueDate).toLocaleDateString('en-GB') : ''}
+                              >
+                                {rd ? rd.text : 'dd/mm/yyyy'}
+                              </span>
+                              <input
+                                type="date"
+                                style={{
+                                  position: 'absolute',
+                                  left: 0, top: 0, width: '100%', height: '100%',
+                                  opacity: 0,
+                                  cursor: 'pointer',
+                                  colorScheme: 'dark'
+                                }}
+                                onChange={e => {
+                                  const d = e.target.value ? new Date(e.target.value).getTime() : undefined;
+                                  setDueDate({ id: todo._id, dueDate: d });
+                                }}
+                                value={todo.dueDate ? new Date(todo.dueDate).toISOString().slice(0, 10) : ''}
+                              />
+                            </div>
+                          )}
                           {!currentUser.isGuest && (
-                            <AssigneePicker
-                              assignedTo={todo.assignedTo}
-                              onToggle={(uid) => handleToggleAssignee(todo._id, todo.assignedTo, uid)}
-                            />
+                            <button
+                              className={`todo-important-btn${todo.important ? " active" : ""}`}
+                              onClick={() => setImportant({ id: todo._id, important: !todo.important })}
+                            >
+                              {todo.important ? "Important" : "Mark as Important"}
+                            </button>
+                          )}
+                          {todo.important && currentUser.isGuest && (
+                            <span className="todo-important-btn active" style={{ pointerEvents: "none" }}>Important</span>
+                          )}
+                          {!currentUser.isGuest && (
+                            <div className="todo-actions">
+                              <button
+                                className="btn ghost sm icon-only"
+                                onClick={() => removeTodo({ id: todo._id })}
+                                title="Delete task"
+                              >
+                                <Icons.X size={11} />
+                              </button>
+                            </div>
                           )}
                         </div>
-                        {rd && (
-                          <span
-                            className="todo-due-badge"
-                            style={{ color: rd.isOverdue ? 'var(--danger)' : rd.isSoon ? 'var(--accent)' : 'var(--text-muted)' }}
-                            title={todo.dueDate ? new Date(todo.dueDate).toLocaleDateString('en-GB') : ''}
-                          >
-                            {rd.text}
-                          </span>
-                        )}
-                        {!currentUser.isGuest && (
-                          <button
-                            className={`todo-important-btn${todo.important ? " active" : ""}`}
-                            onClick={() => setImportant({ id: todo._id, important: !todo.important })}
-                          >
-                            {todo.important ? "Important" : "Mark as Important"}
-                          </button>
-                        )}
-                        {todo.important && currentUser.isGuest && (
-                          <span className="todo-important-btn active" style={{ pointerEvents: "none" }}>Important</span>
-                        )}
-                        {!currentUser.isGuest && (
-                          <div className="todo-actions">
-                            <button
-                              className="btn ghost sm icon-only"
-                              onClick={() => removeTodo({ id: todo._id })}
-                              title="Delete task"
-                            >
-                              <Icons.X size={11} />
-                            </button>
-                          </div>
+                        {expandedTodos[todo._id] && (
+                          <EditableTodoDetails todo={todo} setDetails={setDetails} />
                         )}
                       </div>
                     );
@@ -544,27 +594,62 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
                 )}
               </div>
               {!currentUser.isGuest && (
-                <div className="todo-add-row">
-                  <div style={{ position: 'relative', flex: 1 }}>
+                <div className="todo-add-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px 0' }}>
+                  <div className="todo-add-row" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <div style={{ position: 'relative', flex: 1 }}>
+                      <input
+                        className="todo-add-input"
+                        placeholder="Add a task and press Enter…"
+                        value={newTodo}
+                        maxLength={150}
+                        onChange={e => setNewTodo(e.target.value)}
+                        onKeyDown={e => e.key === "Enter" && handleAddTodo()}
+                        style={{ width: '100%', boxSizing: 'border-box' }}
+                      />
+                      {newTodo.length > 60 && (
+                        <span style={{
+                          position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                          fontSize: 10, color: newTodo.length > 120 ? 'var(--danger)' : 'var(--text-faint)',
+                          pointerEvents: 'none',
+                        }}>{newTodo.length}/150</span>
+                      )}
+                    </div>
                     <input
-                      className="todo-add-input"
-                      placeholder="Add a task and press Enter…"
-                      value={newTodo}
-                      maxLength={150}
-                      onChange={e => setNewTodo(e.target.value)}
-                      onKeyDown={e => e.key === "Enter" && handleAddTodo()}
+                      type="date"
+                      className="todo-add-date"
+                      value={newDueDate}
+                      onChange={e => setNewDueDate(e.target.value)}
+                      title="Set due date"
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid var(--line)',
+                        color: 'var(--text)',
+                        borderRadius: 'var(--r-md)',
+                        padding: '4px 8px',
+                        fontSize: 12,
+                        outline: 'none',
+                        height: 28,
+                        alignSelf: 'center',
+                        colorScheme: 'dark'
+                      }}
                     />
-                    {newTodo.length > 60 && (
-                      <span style={{
-                        position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-                        fontSize: 10, color: newTodo.length > 120 ? 'var(--danger)' : 'var(--text-faint)',
-                        pointerEvents: 'none',
-                      }}>{newTodo.length}/150</span>
-                    )}
+                    <button className="btn sm" onClick={handleAddTodo} disabled={!newTodo.trim()} style={{ height: 28 }}>
+                      <Icons.Plus size={11} /><span>Add</span>
+                    </button>
                   </div>
-                  <button className="btn sm" onClick={handleAddTodo} disabled={!newTodo.trim()}>
-                    <Icons.Plus size={11} /><span>Add</span>
-                  </button>
+                  <textarea
+                    className="todo-add-input"
+                    placeholder="Add details (optional)..."
+                    value={newDetails}
+                    onChange={e => setNewDetails(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleAddTodo();
+                      }
+                    }}
+                    style={{ width: '100%', boxSizing: 'border-box', height: 84, minHeight: 84, paddingTop: 6, resize: 'none' }}
+                  />
                 </div>
               )}
             </div>

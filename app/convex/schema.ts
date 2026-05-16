@@ -151,12 +151,23 @@ export default defineSchema({
 
   todos: defineTable({
     text: v.string(),
+    details: v.optional(v.string()),
     done: v.boolean(),
     assignedTo: v.array(v.string()),
     dueDate: v.optional(v.number()),
     important: v.optional(v.boolean()),
     createdAt: v.number(),
   }).index("by_createdAt", ["createdAt"]),
+
+  calendarEvents: defineTable({
+    text: v.string(),
+    done: v.boolean(),
+    assignedTo: v.array(v.string()),
+    startDate: v.number(),
+    dueDate: v.number(),
+    color: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_startDate", ["startDate"]),
 
   threads: defineTable({
     title: v.string(),

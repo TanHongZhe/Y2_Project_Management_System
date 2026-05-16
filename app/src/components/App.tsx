@@ -16,6 +16,7 @@ import Settings from './screens/Settings';
 import Empty from './screens/Empty';
 import Login from './screens/Login';
 import Meetings from './screens/Meetings';
+import Calendar from './screens/Calendar';
 import CommandPalette from './CommandPalette';
 import GlobalSearch from './GlobalSearch';
 import NotificationBell from './NotificationBell';
@@ -50,6 +51,7 @@ const ROUTE_LABELS: Record<string, string> = {
   settings: "Settings",
   empty: "New Session",
   meetings: "Meeting Notes",
+  calendar: "Calendar",
 };
 
 function loadTweaks(userId?: string): Tweaks {
@@ -137,7 +139,7 @@ export default function App() {
   useEffect(() => {
     const ROUTE_KEYS: Record<string, string> = {
       '1': 'overview', '2': 'chat', '3': 'memory', '4': 'meetings',
-      '5': 'images',   '6': 'components', '7': 'tests', '8': 'docs', '9': 'settings',
+      '5': 'calendar', '6': 'images', '7': 'components', '8': 'tests', '9': 'docs', '0': 'settings',
     };
     function onKey(e: KeyboardEvent) {
       // Cmd+K → command palette
@@ -220,6 +222,7 @@ export default function App() {
   else if (route === "settings")   screen = <Settings tweaks={tweaks} setTweak={setTweak} selectedThreadId={selectedThreadId} onClearThread={handleClearThread} searchBar={searchBar} />;
   else if (route === "empty")      screen = <Empty setRoute={setRoute} />;
   else if (route === "meetings")   screen = <Meetings currentUser={currentUser} readOnly={currentUser.isGuest} searchBar={searchBar} selectedMeetingId={selectedMeetingId ?? undefined} onMeetingConsumed={handleMeetingConsumed} pendingRecord={pendingRecord} onRecordConsumed={handleRecordConsumed} />;
+  else if (route === "calendar")   screen = <Calendar currentUser={currentUser} searchBar={searchBar} />;
 
   return (
     <ToastProvider>
@@ -280,11 +283,12 @@ export default function App() {
                 ['2',          'Go to Chat'],
                 ['3',          'Go to Project Memory'],
                 ['4',          'Go to Meetings'],
-                ['5',          'Go to Images'],
-                ['6',          'Go to Components'],
-                ['7',          'Go to Test Results'],
-                ['8',          'Go to Docs'],
-                ['9',          'Go to Settings'],
+                ['5',          'Go to Calendar'],
+                ['6',          'Go to Images'],
+                ['7',          'Go to Components'],
+                ['8',          'Go to Test Results'],
+                ['9',          'Go to Docs'],
+                ['0',          'Go to Settings'],
               ].map(([k, desc]) => (
                 <div key={k} className="shortcut-row">
                   <span className="shortcut-key">{k}</span>
@@ -333,8 +337,9 @@ function TweaksPanel({
 
   const screens = [
     ["overview", "Overview"], ["chat", "Chat"], ["memory", "Memory"],
-    ["images", "Images"], ["components", "Components"], ["tests", "Tests"],
-    ["docs", "Docs"], ["meetings", "Meetings"], ["settings", "Settings"], ["empty", "Empty"],
+    ["calendar", "Calendar"], ["images", "Images"], ["components", "Components"],
+    ["tests", "Tests"], ["docs", "Docs"], ["meetings", "Meetings"],
+    ["settings", "Settings"], ["empty", "Empty"],
   ];
 
   return (

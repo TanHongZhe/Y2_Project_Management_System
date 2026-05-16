@@ -11,13 +11,16 @@ export interface RelDate { text: string; isOverdue: boolean; isSoon: boolean }
 export function relativeDate(ts: number): RelDate {
   const dayMs = 86_400_000;
   const days = Math.round((ts - Date.now()) / dayMs);
-  if (days === 0)  return { text: 'Today',           isOverdue: false, isSoon: true };
-  if (days === 1)  return { text: 'Tomorrow',         isOverdue: false, isSoon: true };
-  if (days === -1) return { text: 'Yesterday',        isOverdue: true,  isSoon: false };
-  if (days > 1 && days <= 6)   return { text: `in ${days} days`,             isOverdue: false, isSoon: days <= 3 };
-  if (days >= 7)               return { text: `in ${Math.round(days / 7)}w`,  isOverdue: false, isSoon: false };
-  if (days < -1 && days >= -6) return { text: `${Math.abs(days)}d ago`,       isOverdue: true,  isSoon: false };
-  return { text: `${Math.round(Math.abs(days) / 7)}w ago`, isOverdue: true, isSoon: false };
+  
+  const d = new Date(ts);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  const dateStr = `${dd}/${mm}/${yyyy}`;
+
+  if (days === 1) return { text: 'Tomorrow', isOverdue: false, isSoon: true };
+  
+  return { text: dateStr, isOverdue: days < 0, isSoon: days >= 0 && days <= 3 };
 }
 
 /** Human-readable "X ago" for timestamps */

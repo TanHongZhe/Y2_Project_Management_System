@@ -14,14 +14,30 @@ export const list = query({
 });
 
 export const add = mutation({
-  args: { text: v.string() },
+  args: { text: v.string(), dueDate: v.optional(v.number()), details: v.optional(v.string()) },
   handler: async (ctx, args) => {
     await ctx.db.insert("todos", {
       text: args.text,
+      details: args.details,
       done: false,
       assignedTo: [],
       createdAt: Date.now(),
+      dueDate: args.dueDate,
     });
+  },
+});
+
+export const setText = mutation({
+  args: { id: v.id("todos"), text: v.string() },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, { text: args.text });
+  },
+});
+
+export const setDetails = mutation({
+  args: { id: v.id("todos"), details: v.string() },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, { details: args.details });
   },
 });
 
