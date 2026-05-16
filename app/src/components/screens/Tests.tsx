@@ -4,6 +4,8 @@ import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import * as Icons from '../Icons';
+import MentionInput from '../MentionInput';
+import { extractMentionedUserIds } from '../../lib/mentions';
 
 const KNOWN_SUBS = [
   { id: "pv", name: "PV + MPPT", sub: "panel + U1" },
@@ -14,10 +16,11 @@ const KNOWN_SUBS = [
   { id: "system", name: "System integration", sub: "end-to-end" },
 ];
 
-export default function Tests({ readOnly, searchBar }: { readOnly?: boolean; searchBar?: React.ReactNode }) {
+export default function Tests({ readOnly, searchBar, currentUserId }: { readOnly?: boolean; searchBar?: React.ReactNode; currentUserId?: string }) {
   const tests = useQuery(api.tests.list, { limit: 500 });
   const create = useMutation(api.tests.create);
   const remove = useMutation(api.tests.remove);
+  const notifyMention = useMutation(api.notifications.notifyMention);
 
   const [sub, setSub] = useState("all");
   const [showForm, setShowForm] = useState(false);
@@ -59,14 +62,28 @@ export default function Tests({ readOnly, searchBar }: { readOnly?: boolean; sea
         if (m) return { key: parts[0].trim(), value: m[1], unit: m[2] };
         return { key: parts[0].trim(), value: valueAndUnit };
       });
-    await create({
+    const notesText = form.notes.trim();
+    const result = await create({
       title: form.title.trim(),
       subsystem: form.subsystem.trim() || "system",
       result: form.result,
       conditions: form.conditions.trim() || undefined,
-      notes: form.notes.trim() || undefined,
+      notes: notesText || undefined,
       metrics,
     });
+    // Fire @mentions after save so the notification links to a persisted test.
+    if (notesText) {
+      const mentioned = extractMentionedUserIds(notesText, currentUserId);
+      for (const userId of mentioned) {
+        void notifyMention({
+          userId,
+          fromUserId: currentUserId ?? "system",
+          linkRoute: "tests",
+          linkId: result.docId as string,
+          contextLabel: `Test ${result.testId} — ${form.title.trim()}`,
+        });
+      }
+    }
     setForm({ title: "", subsystem: "pv", result: "pending", conditions: "", notes: "", metrics: "" });
     setShowForm(false);
   }
@@ -169,7 +186,14 @@ export default function Tests({ readOnly, searchBar }: { readOnly?: boolean; sea
                   onChange={e => setForm({ ...form, metrics: e.target.value })}
                   style={{ minHeight: 70, fontFamily: "var(--font-mono)", fontSize: 12 }}
                 />
-                <textarea className="input" placeholder="Notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} style={{ minHeight: 60 }} />
+                <MentionInput
+                  className="input"
+                  placeholder="Notes — use @hongzhe to ping a teammate"
+                  value={form.notes}
+                  onChange={(v) => setForm({ ...form, notes: v })}
+                  currentUserId={currentUserId}
+                  style={{ minHeight: 60 }}
+                />
                 <div style={{ display: "flex", gap: 6 }}>
                   <button className="btn primary sm" onClick={submit}>Save</button>
                   <button className="btn ghost sm" onClick={() => setShowForm(false)}>Cancel</button>

@@ -6,11 +6,6 @@ export const stats = query({
   args: {},
   handler: async (ctx) => {
     const components = await ctx.db.query("components").take(500);
-    const decisions = await ctx.db
-      .query("decisions")
-      .withIndex("by_createdAt")
-      .order("desc")
-      .take(50);
     const tests = await ctx.db
       .query("tests")
       .withIndex("by_testedAt")
@@ -63,13 +58,6 @@ export const stats = query({
       who: "ai" | "you";
       what: string;
     }> = [];
-    for (const d of decisions.slice(0, 5)) {
-      recentActivity.push({
-        ts: d.createdAt,
-        who: "ai",
-        what: `Logged decision ${d.decisionId} — ${d.title}`,
-      });
-    }
     for (const t of tests.slice(0, 5)) {
       recentActivity.push({
         ts: t.testedAt,
@@ -82,7 +70,6 @@ export const stats = query({
     return {
       counts: {
         components: components.length,
-        decisions: decisions.length,
         tests: tests.length,
         memoryNotes: memoryNotes.length,
         documents: documents.length,
@@ -97,7 +84,6 @@ export const stats = query({
       },
       componentStatus: statusBreakdown,
       subsystems: Array.from(subsystems.values()),
-      recentDecisions: decisions.slice(0, 5),
       recentTests: tests.slice(0, 5),
       recentActivity: recentActivity.slice(0, 10),
     };

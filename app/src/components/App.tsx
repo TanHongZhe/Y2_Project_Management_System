@@ -16,6 +16,7 @@ import Login from './screens/Login';
 import Meetings from './screens/Meetings';
 import CommandPalette from './CommandPalette';
 import GlobalSearch from './GlobalSearch';
+import NotificationBell from './NotificationBell';
 import { AppUser, getSavedUserId, saveUserId, clearUserId, getUserById } from '../lib/users';
 
 interface Tweaks {
@@ -78,6 +79,7 @@ export default function App() {
   const [cmdOpen, setCmdOpen] = useState(false);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
+  const [pendingRecord, setPendingRecord] = useState(false);
 
   const handleToggleCollapse = useCallback(() => {
     setSidebarCollapsed(c => {
@@ -114,17 +116,23 @@ export default function App() {
     document.documentElement.dataset.surface = tweaks.surface;
   }, [tweaks]);
 
-  // Cmd+K / Ctrl+K global shortcut
+  // Cmd+K / Ctrl+K → command palette; Ctrl+Shift+R → new meeting + record
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
         setCmdOpen(o => !o);
       }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "R") {
+        e.preventDefault();
+        if (!currentUser || currentUser.isGuest) return;
+        setRoute("meetings");
+        setPendingRecord(true);
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [currentUser, setRoute]);
 
   function handleSelectThread(id: string | null) {
     setSelectedThreadId(id);
@@ -151,25 +159,37 @@ export default function App() {
     // The actual mutation is called inside Settings, this just resets local route state if needed
   }
 
+  const handleDocConsumed = useCallback(() => setSelectedDocId(null), []);
+  const handleMeetingConsumed = useCallback(() => setSelectedMeetingId(null), []);
+  const handleRecordConsumed = useCallback(() => setPendingRecord(false), []);
+
   if (!currentUser) {
     return <Login onSelect={handleSelectUser} />;
   }
-
-  const handleDocConsumed = useCallback(() => setSelectedDocId(null), []);
-  const handleMeetingConsumed = useCallback(() => setSelectedMeetingId(null), []);
-  const searchBar = <GlobalSearch setRoute={setRoute} onSelectDoc={setSelectedDocId} onSelectMeeting={setSelectedMeetingId} />;
+  const handleNotificationClick = (r: string, linkId?: string) => {
+    if (r === "meetings" && linkId) setSelectedMeetingId(linkId);
+    setRoute(r);
+  };
+  const searchBar = (
+    <div className="search-bar-wrap">
+      <GlobalSearch setRoute={setRoute} onSelectDoc={setSelectedDocId} onSelectMeeting={setSelectedMeetingId} />
+      {!currentUser.isGuest && (
+        <NotificationBell userId={currentUser.id} onNotificationClick={handleNotificationClick} />
+      )}
+    </div>
+  );
 
   let screen: React.ReactNode = null;
   if (route === "overview")        screen = <Overview setRoute={setRoute} currentUser={currentUser} searchBar={searchBar} />;
   else if (route === "chat")       screen = <Chat tweaks={tweaks} setRoute={setRoute} selectedThreadId={selectedThreadId} onSelectThread={setSelectedThreadId} userId={currentUser.id} searchBar={searchBar} />;
-  else if (route === "memory")     screen = <Memory readOnly={currentUser.isGuest} searchBar={searchBar} />;
+  else if (route === "memory")     screen = <Memory readOnly={currentUser.isGuest} searchBar={searchBar} currentUserId={currentUser.id} />;
   else if (route === "images")     screen = <Images currentUser={currentUser} searchBar={searchBar} />;
   else if (route === "components") screen = <Components readOnly={currentUser.isGuest} searchBar={searchBar} />;
-  else if (route === "tests")      screen = <Tests readOnly={currentUser.isGuest} searchBar={searchBar} />;
+  else if (route === "tests")      screen = <Tests readOnly={currentUser.isGuest} searchBar={searchBar} currentUserId={currentUser.id} />;
   else if (route === "docs")       screen = <Docs readOnly={currentUser.isGuest} searchBar={searchBar} selectedDocId={selectedDocId ?? undefined} onDocConsumed={handleDocConsumed} />;
   else if (route === "settings")   screen = <Settings tweaks={tweaks} setTweak={setTweak} selectedThreadId={selectedThreadId} onClearThread={handleClearThread} searchBar={searchBar} />;
   else if (route === "empty")      screen = <Empty setRoute={setRoute} />;
-  else if (route === "meetings")   screen = <Meetings currentUser={currentUser} readOnly={currentUser.isGuest} searchBar={searchBar} selectedMeetingId={selectedMeetingId ?? undefined} onMeetingConsumed={handleMeetingConsumed} />;
+  else if (route === "meetings")   screen = <Meetings currentUser={currentUser} readOnly={currentUser.isGuest} searchBar={searchBar} selectedMeetingId={selectedMeetingId ?? undefined} onMeetingConsumed={handleMeetingConsumed} pendingRecord={pendingRecord} onRecordConsumed={handleRecordConsumed} />;
 
   return (
     <div className={"app" + (sidebarCollapsed ? " sidebar-collapsed" : "")}>

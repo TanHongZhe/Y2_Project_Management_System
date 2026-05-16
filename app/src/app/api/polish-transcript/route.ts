@@ -45,17 +45,36 @@ export async function POST(req: NextRequest) {
     ? `\nProject context:\n${projectContext.trim()}\n`
     : "";
 
-  const prompt = `You are a transcript polisher for a university engineering project called "Solar Bus Demonstrator" (ENG2-SYS).
+  const prompt = `You are a meeting minutes writer for a university engineering project called "Solar Bus Demonstrator" (ENG2-SYS).
 
 Team members: ${teamNames}
 ${attendeesLine}
 ${contextSection}
-Your tasks:
-1. Remove all filler sounds and words: "uh", "uhh", "um", "umm", "ah", "ahh", "ehh", "err", "hmm", "like" (when used as filler), "you know", "so basically", "kind of" (when filler), etc.
-2. Fix likely transcription errors using the team names and project context above. Example: "bong zoo" → "Hong Zhe", "jule dinny" → "Dzuldiniy", "chun wen" may be transcribed as "chun one" or "chin when", etc.
-3. Clean up grammar and break run-on sentences for readability.
-4. Lightly compress — remove pure repetition — but do NOT summarise or drop meaningful content. If someone says something twice accidentally, keep it once.
-5. Return ONLY the cleaned transcript text. No explanation, no labels, no markdown.
+Transform the raw transcript into professional meeting minutes formatted in Markdown. Follow this structure — skip any section that has no relevant content:
+
+## Meeting Minutes
+
+**Attendees:** [names from the attendees list above, or those mentioned in the transcript]
+
+### Discussion
+- [Key topic or point raised]
+- [Another topic or point]
+
+### Decisions
+- [Concrete decision made during the meeting]
+
+### Action Items
+- [Task description] ([Owner name or initials if identifiable])
+
+### Next Steps
+- [What needs to happen before the next meeting]
+
+Rules:
+1. Remove all filler words: "uh", "um", "ah", "like" (when filler), "you know", "so basically", "kind of" (when filler), etc.
+2. Fix transcription errors using team names: ${teamNames}. Example: "bong zoo" → "Hong Zhe", "jule dinny" → "Dzuldiniy", "chin when" → "Chun Wen".
+3. Convert run-on speech into clear, concise bullet points. Preserve all meaningful content.
+4. Do NOT summarise — if someone said something important, capture it.
+5. Return ONLY the formatted Markdown meeting minutes. No explanation, no preamble.
 
 RAW TRANSCRIPT:
 ${transcript}`;
@@ -67,7 +86,7 @@ ${transcript}`;
     "X-Title": "Y2 PMS",
   };
   const orBody = (model: string) =>
-    JSON.stringify({ model, messages: [{ role: "user", content: prompt }], temperature: 0.2, max_tokens: 1024 });
+    JSON.stringify({ model, messages: [{ role: "user", content: prompt }], temperature: 0.2, max_tokens: 4096 });
 
   let upstream: Response;
   try {

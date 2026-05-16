@@ -37,13 +37,12 @@ export default function Settings({ tweaks, setTweak, selectedThreadId, searchBar
 
   // Data for export
   const memoryNotes = useQuery(api.memoryNotes.list, {});
-  const decisions = useQuery(api.decisions.list, { limit: 500 });
   const components = useQuery(api.components.list, { limit: 500 });
   const tests = useQuery(api.tests.list, { limit: 500 });
 
   async function handleClear() {
     if (!selectedThreadId) return;
-    if (!confirm("Clear all messages in this conversation? Memory and decisions are kept.")) return;
+    if (!confirm("Clear all messages in this conversation? Memory is kept.")) return;
     setClearing(true);
     try {
       await clearMessages({ threadId: selectedThreadId as Id<"threads"> });
@@ -65,15 +64,6 @@ export default function Settings({ tweaks, setTweak, selectedThreadId, searchBar
         lines.push(`### ${n.section}`);
         lines.push(n.content);
         lines.push("");
-      }
-
-      lines.push("---\n");
-      lines.push("## Decision Log\n");
-      for (const d of decisions ?? []) {
-        const date = new Date(d.createdAt).toISOString().slice(0, 10);
-        lines.push(`### ${d.decisionId} — ${d.title}`);
-        lines.push(`_${date}_ · tags: ${d.tags.join(", ") || "none"}`);
-        lines.push(`\n${d.rationale}\n`);
       }
 
       lines.push("---\n");
@@ -237,7 +227,7 @@ export default function Settings({ tweaks, setTweak, selectedThreadId, searchBar
             <div className="settings-row">
               <div className="label-block">
                 <div className="l">Clear conversation</div>
-                <div className="h">Removes chat history for the active thread. Memory and decisions are kept.</div>
+                <div className="h">Removes chat history for the active thread. Memory is kept.</div>
               </div>
               <button
                 className="btn sm"
@@ -250,7 +240,7 @@ export default function Settings({ tweaks, setTweak, selectedThreadId, searchBar
             <div className="settings-row">
               <div className="label-block">
                 <div className="l">Export full state</div>
-                <div className="h">Memory + decisions + components + tests as one .md bundle.</div>
+                <div className="h">Memory + components + tests as one .md bundle.</div>
               </div>
               <button className="btn sm primary" onClick={handleExport} disabled={exporting}>
                 <Icons.Download /><span>{exporting ? "Exporting…" : "Export bundle"}</span>

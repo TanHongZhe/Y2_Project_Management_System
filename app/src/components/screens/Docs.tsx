@@ -42,6 +42,28 @@ export default function Docs({ readOnly, searchBar, selectedDocId, onDocConsumed
   const [dragOver, setDragOver] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string>("");
   const [, setReindexingId] = useState<Id<"documents"> | null>(null);
+  const [reindexAllProgress, setReindexAllProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const handleReindexAll = useCallback(async () => {
+    // Use docs directly (not the derived `list`) to avoid TDZ — list is declared below
+    const all = docs ?? [];
+    if (reindexAllProgress !== null || all.length === 0) return;
+    setReindexAllProgress({ done: 0, total: all.length });
+    let done = 0;
+    for (const doc of all) {
+      setUploadStatus(`Re-indexing ${doc.name} (${done + 1} / ${all.length})…`);
+      try {
+        await processDocument({ documentId: doc._id });
+      } catch {
+        // continue — individual failures don't abort the batch
+      }
+      done++;
+      setReindexAllProgress({ done, total: all.length });
+    }
+    setUploadStatus(`✓ Re-indexed ${done} document${done !== 1 ? "s" : ""}`);
+    setReindexAllProgress(null);
+    setTimeout(() => setUploadStatus(""), 4000);
+  }, [docs, processDocument, reindexAllProgress]);
 
   useEffect(() => {
     if (selectedDocId) {
@@ -123,6 +145,21 @@ export default function Docs({ readOnly, searchBar, selectedDocId, onDocConsumed
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-muted)" }}>
               {uploadStatus}
             </span>
+          )}
+          {!readOnly && list.length > 0 && (
+            <button
+              className="btn sm"
+              onClick={() => void handleReindexAll()}
+              disabled={reindexAllProgress !== null}
+              title="Clear and re-embed all documents with current chunk settings"
+            >
+              <Icons.Branch size={13} />
+              <span>
+                {reindexAllProgress
+                  ? `Re-indexing ${reindexAllProgress.done} / ${reindexAllProgress.total}…`
+                  : "Re-index All"}
+              </span>
+            </button>
           )}
           {!readOnly && (
             <label className="btn primary sm" style={{ cursor: "pointer" }}>

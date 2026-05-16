@@ -8,8 +8,8 @@ import { Id } from "./_generated/dataModel";
 const EMBED_MODEL = "text-embedding-3-small";
 const VISION_MODEL = "gpt-4o-mini";
 const EMBED_DIM = 1536;
-const TARGET_CHUNK_CHARS = 600;
-const OVERLAP_CHARS = 60;
+const TARGET_CHUNK_CHARS = 1400;
+const OVERLAP_CHARS = 140;
 
 type DocType = "pdf" | "image" | "md" | "json" | "txt";
 
@@ -132,7 +132,7 @@ async function captionImage(apiKey: string, dataUrl: string, name: string): Prom
           ],
         },
       ],
-      max_tokens: 400,
+      max_tokens: 700,
     }),
   });
   if (!res.ok) {
@@ -169,6 +169,9 @@ export const processDocument = action({
 
     const doc = await ctx.runQuery(internal.documents.getInternal, { documentId });
     if (!doc) throw new Error(`document ${documentId} not found`);
+
+    // Clear any previously-indexed chunks so re-ingestion doesn't leave duplicates
+    await ctx.runMutation(internal.chunks.deleteByDocument, { documentId });
 
     await ctx.runMutation(internal.documents.setStatus, {
       documentId,

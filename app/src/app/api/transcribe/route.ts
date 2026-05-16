@@ -34,9 +34,16 @@ export async function POST(req: NextRequest) {
   }
 
   const ext = getExtension(audio.type);
+  // Whisper rejects MIME types with codec params (e.g. "audio/webm;codecs=opus")
+  // even though webm is supported. Re-wrap with a clean MIME so the multipart
+  // Content-Type matches a format Whisper accepts.
+  const cleanMime = ext === "mp4" ? "audio/mp4" : ext === "ogg" ? "audio/ogg" : "audio/webm";
+  const cleanBlob = new Blob([await audio.arrayBuffer()], { type: cleanMime });
+
   const whisperForm = new FormData();
-  whisperForm.append("file", audio, `recording.${ext}`);
+  whisperForm.append("file", cleanBlob, `recording.${ext}`);
   whisperForm.append("model", "whisper-1");
+  // Force English output — without this, Manglish/code-switching gets detected as Malay
   whisperForm.append("language", "en");
 
   let upstream: Response;

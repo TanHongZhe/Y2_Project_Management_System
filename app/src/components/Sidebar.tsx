@@ -49,7 +49,7 @@ export default function Sidebar({ route, setRoute, selectedThreadId, onSelectThr
   const threads = useQuery(api.threads.list, { limit: 20, userId: currentUser.id });
   const createThread = useMutation(api.threads.create);
 
-  const counts = stats?.counts ?? { components: 0, decisions: 0, tests: 0, memoryNotes: 0, documents: 0 };
+  const counts = stats?.counts ?? { components: 0, tests: 0, memoryNotes: 0, documents: 0 };
   const budget = stats?.budget ?? { spent: 0, committed: 0, cap: 60, pct: 0 };
   const pct = Math.min(1, budget.pct);
 

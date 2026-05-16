@@ -6,19 +6,15 @@ export const globalSearch = query({
   handler: async (ctx, { q }) => {
     const term = q.trim();
     if (term.length < 2) {
-      return { components: [], decisions: [], memory: [], tests: [], meetings: [], chunks: [] };
+      return { components: [], memory: [], tests: [], meetings: [], chunks: [] };
     }
 
-    const [componentsByName, allComponents, decisions, memoryByContent, allMemory, tests, meetingsByContent, allMeetings, chunks] = await Promise.all([
+    const [componentsByName, allComponents, memoryByContent, allMemory, tests, meetingsByContent, allMeetings, chunks] = await Promise.all([
       ctx.db
         .query("components")
         .withSearchIndex("search_name", (sq) => sq.search("name", term))
         .take(5),
       ctx.db.query("components").collect(),
-      ctx.db
-        .query("decisions")
-        .withSearchIndex("search_title", (sq) => sq.search("title", term))
-        .take(5),
       ctx.db
         .query("memoryNotes")
         .withSearchIndex("search_content", (sq) => sq.search("content", term))
@@ -76,6 +72,6 @@ export const globalSearch = query({
     }
     meetings.splice(6);
 
-    return { components, decisions, memory, tests, meetings, chunks };
+    return { components, memory, tests, meetings, chunks };
   },
 });

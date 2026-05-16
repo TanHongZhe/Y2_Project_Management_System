@@ -13,7 +13,6 @@ interface GlobalSearchProps {
 
 const ROUTE_FOR: Record<string, string> = {
   components: "components",
-  decisions: "memory",
   memory: "memory",
   tests: "tests",
   meetings: "meetings",
@@ -56,7 +55,6 @@ export default function GlobalSearch({ setRoute, onSelectDoc, onSelectMeeting }:
     results &&
     (results.chunks.length > 0 ||
       results.components.length > 0 ||
-      results.decisions.length > 0 ||
       results.memory.length > 0 ||
       results.tests.length > 0 ||
       results.meetings.length > 0);
@@ -106,14 +104,6 @@ export default function GlobalSearch({ setRoute, onSelectDoc, onSelectMeeting }:
             <Group label="Components" onNavigate={() => navigate("components")}>
               {results.components.map((c, i) => (
                 <Item key={i} icon={<Icons.Chip size={12} />} title={c.name} sub={`${c.ref} · ${c.status}`} onClick={() => navigate("components")} />
-              ))}
-            </Group>
-          )}
-
-          {results?.decisions && results.decisions.length > 0 && (
-            <Group label="Decisions" onNavigate={() => navigate("memory")}>
-              {results.decisions.map((d, i) => (
-                <Item key={i} icon={<Icons.File size={12} />} title={d.title} sub={d.decisionId} onClick={() => navigate("memory")} />
               ))}
             </Group>
           )}

@@ -6,11 +6,14 @@ import { api } from '../../../convex/_generated/api';
 import { Id } from '../../../convex/_generated/dataModel';
 import { renderMarkdown } from '@/lib/markdown';
 import * as Icons from '../Icons';
+import MentionInput from '../MentionInput';
+import { extractMentionedUserIds } from '../../lib/mentions';
 
-export default function Memory({ readOnly, searchBar }: { readOnly?: boolean; searchBar?: React.ReactNode }) {
+export default function Memory({ readOnly, searchBar, currentUserId }: { readOnly?: boolean; searchBar?: React.ReactNode; currentUserId?: string }) {
   const notes = useQuery(api.memoryNotes.list, {});
   const upsert = useMutation(api.memoryNotes.upsert);
   const remove = useMutation(api.memoryNotes.remove);
+  const notifyMention = useMutation(api.notifications.notifyMention);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<Id<"memoryNotes"> | null>(null);
@@ -38,8 +41,21 @@ export default function Memory({ readOnly, searchBar }: { readOnly?: boolean; se
 
   async function commitEdit(section: string) {
     if (!editingId) return;
+    const savedId = editingId;
     await upsert({ section, content: draft, author: "you" });
     setEditingId(null);
+    // Fire @mentions after the save so the notification's linkId points to a
+    // persisted doc. Server is idempotent per (linkId, user) so re-edits stay safe.
+    const mentioned = extractMentionedUserIds(draft, currentUserId);
+    for (const userId of mentioned) {
+      void notifyMention({
+        userId,
+        fromUserId: currentUserId ?? "system",
+        linkRoute: "memory",
+        linkId: savedId as string,
+        contextLabel: `Project Memory — ${section}`,
+      });
+    }
   }
 
   async function createSection() {
@@ -188,10 +204,12 @@ export default function Memory({ readOnly, searchBar }: { readOnly?: boolean; se
               </header>
               <div className="content">
                 {editingId === s._id && !readOnly ? (
-                  <textarea
+                  <MentionInput
                     autoFocus
                     value={draft}
-                    onChange={e => setDraft(e.target.value)}
+                    onChange={setDraft}
+                    currentUserId={currentUserId}
+                    placeholder="Notes — use @hongzhe to mention a teammate"
                     style={{
                       width: "100%",
                       minHeight: 180,

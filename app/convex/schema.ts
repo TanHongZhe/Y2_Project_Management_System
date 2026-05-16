@@ -67,17 +67,6 @@ export default defineSchema({
     .index("by_uploadedAt", ["uploadedAt"])
     .index("by_category", ["category"]),
 
-  decisions: defineTable({
-    decisionId: v.string(),
-    title: v.string(),
-    rationale: v.string(),
-    tags: v.array(v.string()),
-    createdAt: v.number(),
-  })
-    .index("by_decisionId", ["decisionId"])
-    .index("by_createdAt", ["createdAt"])
-    .searchIndex("search_title", { searchField: "title" }),
-
   components: defineTable({
     ref: v.string(),
     name: v.string(),
@@ -135,9 +124,23 @@ export default defineSchema({
     content: v.string(),
     createdBy: v.string(),
     updatedAt: v.number(),
+    audioStorageId: v.optional(v.id("_storage")),
   })
     .index("by_date", ["date"])
     .searchIndex("search_content", { searchField: "content" }),
+
+  notifications: defineTable({
+    userId: v.string(),
+    type: v.union(v.literal("mention"), v.literal("task_assigned")),
+    message: v.string(),
+    linkRoute: v.optional(v.string()),
+    linkId: v.optional(v.string()),
+    fromUserId: v.optional(v.string()),
+    read: v.boolean(),
+    createdAt: v.number(),
+  })
+    .index("by_userId_createdAt", ["userId", "createdAt"])
+    .index("by_linkId_userId_type", ["linkId", "userId", "type"]),
 
   sentEmails: defineTable({
     todoId: v.id("todos"),

@@ -348,7 +348,6 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
   }, [threadId]);
 
   const memoryNotes = useQuery(api.memoryNotes.list, {});
-  const recentDecisions = useQuery(api.decisions.list, { limit: 5 });
   const recentDocs = useQuery(api.documents.list, { limit: 8 });
 
   async function newThread() {
@@ -667,7 +666,7 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
                 <div style={{ marginTop: 6 }}>
                   <span className="hl">system</span>: project copilot, tool calling enabled.{" "}
                   <span className="hl">tools</span>: log_decision, add_component, update_memory, log_test_result, web_search, ask_clarification{" "}
-                  <span className="hl">retrieval</span>: top-8 vector search over chunks + pinned memory + last 5 decisions{" "}
+                  <span className="hl">retrieval</span>: top-8 vector search over chunks + pinned memory{" "}
                   <span className="hl">model</span>: {boost ? MODELS.boost.id : MODELS.flash.id}
                 </div>
               </div>
@@ -832,18 +831,6 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
                       <div className="item" key={n._id}>
                         {n.content.slice(0, 120) || <em style={{ color: "var(--text-faint)" }}>empty</em>}
                         <span className="ts">memory · {n.section}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="rail-section">
-                    <h4>Recent decisions</h4>
-                    {(!recentDecisions || recentDecisions.length === 0) && (
-                      <div className="item" style={{ color: "var(--text-faint)" }}>None yet.</div>
-                    )}
-                    {recentDecisions?.slice(0, 5).map(d => (
-                      <div className="item" key={d._id}>
-                        {d.title}
-                        <span className="ts">{d.decisionId} · {new Date(d.createdAt).toISOString().slice(0, 10)}</span>
                       </div>
                     ))}
                   </div>

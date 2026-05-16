@@ -12,7 +12,58 @@ import { Markdown } from 'tiptap-markdown';
 import { api } from '../../../convex/_generated/api';
 import { Id } from '../../../convex/_generated/dataModel';
 import { USERS } from '../../lib/users';
+import { MENTION_HANDLES, MENTION_MAP, MentionHandle, extractMentionedUserIds } from '../../lib/mentions';
 import * as Icons from '../Icons';
+import AudioPlayer from '../AudioPlayer';
+import { marked } from 'marked';
+import { DOMParser as PMDOMParser, Node as PMNode } from '@tiptap/pm/model';
+import { Extension } from '@tiptap/core';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
+
+// ProseMirror plugin: paints any `@handle` that matches a known user with an
+// amber class. Pure decoration — never touches the underlying markdown, so the
+// stored content stays plain text and existing meetings remain readable.
+const MENTION_REGEX = /@([a-zA-Z]+)/g;
+const mentionDecorationKey = new PluginKey('mention-decoration');
+
+function buildMentionDecorations(doc: PMNode): DecorationSet {
+  const decos: Decoration[] = [];
+  doc.descendants((node, pos) => {
+    if (!node.isText || !node.text) return;
+    const text = node.text;
+    MENTION_REGEX.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = MENTION_REGEX.exec(text)) !== null) {
+      const handle = m[1].toLowerCase();
+      if (!MENTION_MAP[handle]) continue;
+      const from = pos + m.index;
+      const to = from + m[0].length;
+      decos.push(Decoration.inline(from, to, { class: 'mention-token' }));
+    }
+  });
+  return DecorationSet.create(doc, decos);
+}
+
+const MentionDecoration = Extension.create({
+  name: 'mentionDecoration',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: mentionDecorationKey,
+        state: {
+          init: (_config, state) => buildMentionDecorations(state.doc),
+          apply: (tr, old) => (tr.docChanged ? buildMentionDecorations(tr.doc) : old),
+        },
+        props: {
+          decorations(state) {
+            return mentionDecorationKey.getState(state);
+          },
+        },
+      }),
+    ];
+  },
+});
 
 interface MeetingsProps {
   currentUser: { id: string; name: string };
@@ -20,6 +71,8 @@ interface MeetingsProps {
   searchBar?: React.ReactNode;
   selectedMeetingId?: string;
   onMeetingConsumed?: () => void;
+  pendingRecord?: boolean;
+  onRecordConsumed?: () => void;
 }
 
 interface MeetingEditorHandle {
@@ -51,13 +104,17 @@ function getBestMimeType(): string {
   return types.find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
 }
 
-export default function Meetings({ currentUser, readOnly, searchBar, selectedMeetingId, onMeetingConsumed }: MeetingsProps) {
+export default function Meetings({ currentUser, readOnly, searchBar, selectedMeetingId, onMeetingConsumed, pendingRecord, onRecordConsumed }: MeetingsProps) {
   const meetings = useQuery(api.meetings.list, {});
   const memoryNotes = useQuery(api.memoryNotes.list, {});
   const create = useMutation(api.meetings.create);
   const update = useMutation(api.meetings.update);
   const remove = useMutation(api.meetings.remove);
   const upsertMemory = useMutation(api.memoryNotes.upsert);
+  const generateAudioUploadUrl = useMutation(api.meetings.generateAudioUploadUrl);
+  const saveAudio = useMutation(api.meetings.saveAudio);
+  const deleteAudio = useMutation(api.meetings.deleteAudio);
+  const notifyMention = useMutation(api.notifications.notifyMention);
 
   const [selectedId, setSelectedId] = useState<Id<"meetingNotes"> | null>(null);
   const [title, setTitle] = useState("");
@@ -79,9 +136,55 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
   const [polishing, setPolishing] = useState(false);
   const [transcribeError, setTranscribeError] = useState<string | null>(null);
 
+  // Audio playback state — local URL is used for instant playback before the
+  // upload completes; once `audioStorageId` is set we use the signed Convex URL.
+  const [localAudioUrl, setLocalAudioUrl] = useState<string | null>(null);
+  const [audioUploading, setAudioUploading] = useState(false);
+  const [recordBlocked, setRecordBlocked] = useState(false);
+  const mentionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const canRecord = typeof window !== 'undefined' && typeof MediaRecorder !== 'undefined';
 
   const selectedMeeting = meetings?.find((m) => m._id === selectedId);
+  const audioUrl = useQuery(
+    api.meetings.getAudioUrl,
+    selectedMeeting?.audioStorageId ? { storageId: selectedMeeting.audioStorageId } : 'skip',
+  );
+
+  // 1 recording per meeting — disable Record once we have audio (locally or persisted).
+  const hasAudio = !!selectedMeeting?.audioStorageId || !!localAudioUrl;
+  const playerSrc = localAudioUrl ?? audioUrl ?? null;
+
+  // Ctrl+Shift+R: create a new meeting and immediately start recording.
+  // React Strict Mode fires this effect twice on mount — without the ref guard,
+  // we'd create two meetings AND request two mic streams (only one of which
+  // gets released on Stop, leaving the browser mic indicator stuck on).
+  const autoRecordTriggered = useRef(false);
+  useEffect(() => {
+    if (!pendingRecord) {
+      autoRecordTriggered.current = false;
+      return;
+    }
+    if (autoRecordTriggered.current) return;
+    if (readOnly || !canRecord) {
+      onRecordConsumed?.();
+      return;
+    }
+    autoRecordTriggered.current = true;
+    void (async () => {
+      const id = await create({
+        title: `Meeting ${fmtDate(Date.now())}`,
+        date: Date.now(),
+        attendees: [currentUser.id],
+        content: "",
+        createdBy: currentUser.id,
+      });
+      setSelectedId(id as Id<"meetingNotes">);
+      onRecordConsumed?.();
+      await startRecording();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRecord]);
 
   useEffect(() => {
     if (selectedMeetingId) {
@@ -99,18 +202,27 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
       setSyncMsg(null);
       setTranscribeError(null);
     }
+    // Clear local-only audio when switching meetings; the persisted URL takes over.
+    setLocalAudioUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setRecordBlocked(false);
   }, [selectedId]);
 
   // Stop recording and release mic on unmount
   useEffect(() => {
     return () => {
       if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+      if (mentionTimerRef.current) clearTimeout(mentionTimerRef.current);
       if (mediaRecorderRef.current) {
         mediaRecorderRef.current.onstop = null;
         try { mediaRecorderRef.current.stop(); } catch { /* already stopped */ }
         mediaRecorderRef.current.stream?.getTracks().forEach((t) => t.stop());
       }
+      if (localAudioUrl) URL.revokeObjectURL(localAudioUrl);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function scheduleSave(patch: Partial<{ title: string; content: string; attendees: string[]; date: number }>) {
@@ -119,6 +231,39 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
     saveTimer.current = setTimeout(() => {
       update({ id: selectedId!, ...patch });
     }, 800);
+  }
+
+  // Debounced @mention scan — fires notifications 3s after the last keystroke.
+  // Server is idempotent per (meeting, user), so re-firing on every edit is safe.
+  function scheduleMentionCheck(md: string) {
+    if (!selectedId || readOnly) return;
+    if (mentionTimerRef.current) clearTimeout(mentionTimerRef.current);
+    const meetingId = selectedId;
+    const meetingTitle = title;
+    mentionTimerRef.current = setTimeout(() => {
+      const mentioned = extractMentionedUserIds(md, currentUser.id);
+      for (const userId of mentioned) {
+        void notifyMention({
+          userId,
+          fromUserId: currentUser.id,
+          linkRoute: 'meetings',
+          linkId: meetingId as string,
+          contextLabel: meetingTitle,
+        });
+      }
+    }, 3000);
+  }
+
+  async function handleDeleteAudio() {
+    if (!selectedId) return;
+    if (localAudioUrl) {
+      URL.revokeObjectURL(localAudioUrl);
+      setLocalAudioUrl(null);
+    }
+    if (selectedMeeting?.audioStorageId) {
+      await deleteAudio({ id: selectedId });
+    }
+    setRecordBlocked(false);
   }
 
   async function handleCreate() {
@@ -180,7 +325,16 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
     setSelectedId(null);
   }
 
+  function flashRecordBlocked() {
+    setRecordBlocked(true);
+    setTimeout(() => setRecordBlocked(false), 2400);
+  }
+
   async function startRecording() {
+    if (hasAudio) {
+      flashRecordBlocked();
+      return;
+    }
     setTranscribeError(null);
     const mimeType = getBestMimeType();
     if (!mimeType) {
@@ -221,6 +375,35 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
     const blob = new Blob(chunksRef.current, { type: mimeType });
     chunksRef.current = [];
 
+    // Instant local playback while the upload runs in the background.
+    const localUrl = URL.createObjectURL(blob);
+    setLocalAudioUrl(localUrl);
+
+    const meetingIdForUpload = selectedId;
+    if (meetingIdForUpload) {
+      void (async () => {
+        setAudioUploading(true);
+        try {
+          const uploadUrl = await generateAudioUploadUrl();
+          const res = await fetch(uploadUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': blob.type },
+            body: blob,
+          });
+          if (!res.ok) throw new Error(`upload HTTP ${res.status}`);
+          const { storageId } = (await res.json()) as { storageId: string };
+          await saveAudio({
+            id: meetingIdForUpload,
+            audioStorageId: storageId as Id<'_storage'>,
+          });
+        } catch (e) {
+          console.error('[audio-upload]', e);
+        } finally {
+          setAudioUploading(false);
+        }
+      })();
+    }
+
     setTranscribing(true);
     setTranscribeError(null);
     try {
@@ -229,7 +412,8 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
       fd.append("audio", blob, `recording.${ext}`);
       const res = await fetch("/api/transcribe", { method: "POST", body: fd });
       if (!res.ok) {
-        const err = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as { error: string };
+        const err = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as { error: string; detail?: string };
+        console.error("[transcribe] API error:", err.error, err.detail ?? "");
         throw new Error(err.error);
       }
       const data = (await res.json()) as { transcript: string };
@@ -293,14 +477,30 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
             ) : polishing ? (
               <span className="record-timer">Polishing…</span>
             ) : (
-              <button
-                className="btn sm"
-                disabled={!selectedId}
-                onClick={startRecording}
-                title={!selectedId ? "Select a meeting first" : "Record meeting audio"}
-              >
-                <Icons.Mic size={13} /><span>Record</span>
-              </button>
+              <span className={"record-btn-wrap" + (recordBlocked ? " flash" : "") + (hasAudio ? " blocked" : "")}>
+                <button
+                  className={"btn sm" + (hasAudio ? " record-disabled" : "")}
+                  disabled={!selectedId}
+                  aria-disabled={hasAudio || !selectedId}
+                  onClick={hasAudio ? flashRecordBlocked : startRecording}
+                  onMouseEnter={() => { if (hasAudio) setRecordBlocked(true); }}
+                  onMouseLeave={() => { if (hasAudio) setRecordBlocked(false); }}
+                  title={
+                    !selectedId
+                      ? "Select a meeting first"
+                      : hasAudio
+                        ? "Only 1 recording per meeting — delete the existing one to record again"
+                        : "Record meeting audio"
+                  }
+                >
+                  <Icons.Mic size={13} /><span>Record</span>
+                </button>
+                {hasAudio && recordBlocked && (
+                  <span className="record-blocked-tip" role="status">
+                    Only 1 recording per meeting. Delete the existing recording first.
+                  </span>
+                )}
+              </span>
             )
           )}
           {!readOnly && (
@@ -367,20 +567,40 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
               </div>
 
               <div className="meeting-attendees-row">
-                <span className="meeting-attendees-label">Attendees</span>
-                <div className="meeting-attendees-chips">
-                  {USERS.filter((u) => !u.isGuest).map((u) => (
-                    <button
-                      key={u.id}
-                      className={"attendee-chip" + (attendees.includes(u.id) ? " active" : "")}
-                      style={attendees.includes(u.id) ? { background: u.color, color: "#fff", borderColor: u.color } : undefined}
-                      onClick={() => toggleAttendee(u.id)}
-                      title={u.name}
-                    >
-                      {u.initials}
-                    </button>
-                  ))}
+                <div className="meeting-attendees-left">
+                  <span className="meeting-attendees-label">Attendees</span>
+                  <div className="meeting-attendees-chips">
+                    {USERS.filter((u) => !u.isGuest).map((u) => (
+                      <button
+                        key={u.id}
+                        className={"attendee-chip" + (attendees.includes(u.id) ? " active" : "")}
+                        style={attendees.includes(u.id) ? { background: u.color, color: "#fff", borderColor: u.color } : undefined}
+                        onClick={() => toggleAttendee(u.id)}
+                        title={u.name}
+                      >
+                        {u.initials}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+                {playerSrc && (
+                  <div className="meeting-audio-wrap">
+                    <AudioPlayer
+                      src={playerSrc}
+                      uploading={audioUploading}
+                      filename={`${title || 'recording'}.webm`}
+                    />
+                    {!readOnly && (
+                      <button
+                        className="ap-btn ap-delete"
+                        title="Delete recording (lets you record again)"
+                        onClick={handleDeleteAudio}
+                      >
+                        <Icons.Trash size={13} />
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               <MeetingEditor
@@ -388,9 +608,11 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
                 key={selectedId}
                 initialContent={selectedMeeting.content}
                 readOnly={readOnly}
+                currentUserId={currentUser.id}
                 onChange={(md) => {
                   setContent(md);
                   scheduleSave({ content: md });
+                  scheduleMentionCheck(md);
                 }}
               />
 
@@ -434,7 +656,28 @@ const MeetingEditor = React.forwardRef<MeetingEditorHandle, {
   initialContent: string;
   readOnly?: boolean;
   onChange: (md: string) => void;
-}>(function MeetingEditor({ initialContent, readOnly, onChange }, ref) {
+  currentUserId?: string;
+}>(function MeetingEditor({ initialContent, readOnly, onChange, currentUserId }, ref) {
+  // @ mention dropdown — when the cursor sits right after `@<word>`, a list of
+  // matching team members appears so the user can insert the canonical handle
+  // (and trigger a notification once the debounced scan runs upstream).
+  interface MentionUIState {
+    from: number;          // doc position of the `@`
+    query: string;
+    index: number;
+    filtered: MentionHandle[];
+    coords: { left: number; top: number };
+    placement: 'below' | 'above';
+  }
+  const [mention, setMention] = React.useState<MentionUIState | null>(null);
+  const mentionRef = React.useRef<MentionUIState | null>(null);
+  mentionRef.current = mention;
+
+  const closeMention = React.useCallback(() => {
+    mentionRef.current = null;
+    setMention(null);
+  }, []);
+
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -443,28 +686,118 @@ const MeetingEditor = React.forwardRef<MeetingEditorHandle, {
       TableHeader,
       TableCell,
       Markdown.configure({ html: false, transformPastedText: true }),
+      MentionDecoration,
     ],
     content: initialContent,
     editable: !readOnly,
+    editorProps: {
+      handleKeyDown(_view, event) {
+        const m = mentionRef.current;
+        if (!m || m.filtered.length === 0) return false;
+        if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          const next = (m.index + 1) % m.filtered.length;
+          mentionRef.current = { ...m, index: next };
+          setMention(mentionRef.current);
+          return true;
+        }
+        if (event.key === 'ArrowUp') {
+          event.preventDefault();
+          const next = (m.index - 1 + m.filtered.length) % m.filtered.length;
+          mentionRef.current = { ...m, index: next };
+          setMention(mentionRef.current);
+          return true;
+        }
+        if (event.key === 'Enter' || event.key === 'Tab') {
+          event.preventDefault();
+          insertMention(m.filtered[m.index].handle);
+          return true;
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeMention();
+          return true;
+        }
+        return false;
+      },
+    },
     onUpdate({ editor }) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const md = (editor.storage as unknown as { markdown: { getMarkdown: () => string } }).markdown.getMarkdown();
       onChange(md);
+      detectMention(editor);
+    },
+    onSelectionUpdate({ editor }) {
+      detectMention(editor);
+    },
+    onBlur() {
+      // Slight delay so dropdown clicks can still register before close.
+      setTimeout(() => closeMention(), 120);
     },
   });
+
+  function detectMention(ed: NonNullable<typeof editor>) {
+    const sel = ed.state.selection;
+    if (sel.from !== sel.to) { closeMention(); return; }
+    const $from = ed.state.doc.resolve(sel.from);
+    const blockStart = $from.start();
+    const before = ed.state.doc.textBetween(blockStart, sel.from, '\n', '\n');
+    // Match `@word` at end of text, allowing it to follow start-of-block, whitespace, or punctuation.
+    const match = before.match(/(?:^|[\s(\[{"'`])@([a-zA-Z]*)$/);
+    if (!match) { closeMention(); return; }
+    const query = match[1].toLowerCase();
+    const atPos = sel.from - match[1].length - 1;
+    const filtered = query
+      ? MENTION_HANDLES.filter((h) => h.handle.startsWith(query) || h.name.toLowerCase().includes(query))
+      : MENTION_HANDLES;
+    if (filtered.length === 0) { closeMention(); return; }
+    const coords = ed.view.coordsAtPos(atPos);
+    // Dropdown rows are ~34px tall plus 8px padding; clamp to a reasonable max.
+    const estHeight = Math.min(filtered.length * 34 + 8, 260);
+    const viewportH = window.innerHeight;
+    const spaceBelow = viewportH - coords.bottom;
+    const spaceAbove = coords.top;
+    const placeAbove = spaceBelow < estHeight + 12 && spaceAbove > spaceBelow;
+    const top = placeAbove ? Math.max(8, coords.top - estHeight - 4) : coords.bottom + 4;
+    const next: MentionUIState = {
+      from: atPos,
+      query,
+      index: 0,
+      filtered,
+      coords: { left: coords.left, top },
+      placement: placeAbove ? 'above' : 'below',
+    };
+    mentionRef.current = next;
+    setMention(next);
+  }
+
+  function insertMention(handle: string) {
+    const m = mentionRef.current;
+    if (!m || !editor) return;
+    const to = editor.state.selection.from;
+    editor.chain().focus().insertContentAt({ from: m.from, to }, `@${handle} `).run();
+    closeMention();
+  }
 
   React.useImperativeHandle(ref, () => ({
     appendTranscript: (text: string) => {
       if (!editor) return;
-      const end = editor.state.doc.content.size;
-      editor.chain()
-        .focus()
-        .insertContentAt(end, [
-          { type: "horizontalRule" },
-          { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Recording Transcript" }] },
-          { type: "paragraph", content: [{ type: "text", text: text }] },
-        ])
-        .run();
+      const html = marked.parse(text) as string;
+
+      // Parse HTML → ProseMirror nodes, then pass as JSON to insertContentAt.
+      // JSON bypasses tiptap-markdown's html:false restriction (which causes HTML
+      // strings to be treated as plain text regardless of the insertion method used).
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = html;
+      const parsed = PMDOMParser.fromSchema(editor.state.schema).parse(wrapper, {
+        preserveWhitespace: false,
+      });
+      const jsonNodes = [
+        { type: 'horizontalRule' },
+        ...(parsed.toJSON().content as object[]),
+      ];
+
+      editor.chain().focus().insertContentAt(editor.state.doc.content.size, jsonNodes).run();
     },
   }), [editor]);
 
@@ -526,6 +859,51 @@ const MeetingEditor = React.forwardRef<MeetingEditorHandle, {
         </div>
       )}
       <EditorContent editor={editor} className="meeting-prosemirror" />
+      {mention && mention.filtered.length > 0 && (
+        <div
+          className={"mention-dropdown mention-" + mention.placement}
+          style={{ left: mention.coords.left, top: mention.coords.top }}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          {mention.filtered.map((m, i) => {
+            const isSelf = m.userId === currentUserId;
+            return (
+              <button
+                key={m.userId}
+                type="button"
+                className={
+                  'mention-item' +
+                  (i === mention.index ? ' active' : '') +
+                  (m.isBroadcast ? ' mention-broadcast' : '')
+                }
+                onMouseEnter={() => {
+                  if (mentionRef.current) {
+                    mentionRef.current = { ...mentionRef.current, index: i };
+                    setMention(mentionRef.current);
+                  }
+                }}
+                onClick={() => insertMention(m.handle)}
+                title={
+                  m.isBroadcast
+                    ? 'Notify everyone on the team'
+                    : isSelf
+                      ? "That's you — won't notify yourself"
+                      : `Notify ${m.name}`
+                }
+              >
+                <span className="mention-avatar" style={{ background: m.color }}>
+                  {m.isBroadcast ? '@' : m.initials}
+                </span>
+                <span className="mention-name">
+                  {m.name}
+                  {isSelf && <span className="mention-you"> (you)</span>}
+                </span>
+                <span className="mention-handle">@{m.handle}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 });

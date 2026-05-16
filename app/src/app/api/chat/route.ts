@@ -42,7 +42,6 @@ type AnyMessage =
   | { role: "tool"; tool_call_id: string; content: string };
 
 type ToolName =
-  | "log_decision"
   | "add_component"
   | "update_memory"
   | "log_test_result"
@@ -56,34 +55,11 @@ type ToolDefinition = {
     description: string;
     parameters: Record<string, unknown>;
   };
+  // Anthropic prompt-caching breakpoint (ignored by non-Claude providers)
+  cache_control?: { type: "ephemeral" };
 };
 
 const TOOLS: ToolDefinition[] = [
-  {
-    type: "function",
-    function: {
-      name: "log_decision",
-      description:
-        "Append a decision to the project decision log. Use when the user confirms a design choice or you want to formalise a trade-off.",
-      parameters: {
-        type: "object",
-        properties: {
-          title: { type: "string", description: "One-line decision title" },
-          rationale: {
-            type: "string",
-            description: "Why this was chosen, including any trade-offs",
-          },
-          tags: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Topic tags like arch / bus / pv / bom / cost / firmware",
-          },
-        },
-        required: ["title", "rationale"],
-      },
-    },
-  },
   {
     type: "function",
     function: {
@@ -223,14 +199,16 @@ const TOOLS: ToolDefinition[] = [
         required: ["question", "options"],
       },
     },
+    // Cache breakpoint: all tool definitions above are static and can be cached
+    cache_control: { type: "ephemeral" },
   },
 ];
 
 const SYSTEM_PROMPT = `You are the project copilot for the Y2 Solar Bus Demonstrator — a small hardware project. Be concise, engineering-accurate, and grounded in retrieved context.
 
 Rules:
-- Treat retrieved context (chunks, memory notes, decisions) as ground truth. Cite filenames when you quote specific numbers.
-- When the user reports a decision, measurement, new part, or enduring constraint, call the matching tool to record it. Do not invent confirmation: only call tools when the user clearly intends to log something.
+- Treat retrieved context (chunks, memory notes) as ground truth. Cite filenames when you quote specific numbers.
+- When the user reports a measurement, new part, or enduring constraint, call the matching tool to record it. Do not invent confirmation: only call tools when the user clearly intends to log something.
 - Prefer tool calls over verbose prose when the user asks you to "log", "record", "add", "save", or "remember".
 - When calling tools, copy numeric values (prices, quantities, measurements) exactly as stated by the user — never transpose digits (e.g. £4.20 must be passed as 4.20, not 4.02).
 - If a question cannot be answered from retrieved context, say so plainly instead of guessing.
@@ -261,12 +239,10 @@ async function buildContext(
     limit: 16,
   });
   const memoryPromise = convex.query(api.memoryNotes.list, {});
-  const decisionsPromise = convex.query(api.decisions.list, { limit: 5 });
 
-  const [rag, memoryNotes, decisions] = await Promise.all([
+  const [rag, memoryNotes] = await Promise.all([
     ragPromise.catch(() => ({ textChunks: [], imageChunks: [], allCandidates: [] })),
     memoryPromise.catch(() => []),
-    decisionsPromise.catch(() => []),
   ]);
 
   const citations: Array<{ file: string; section?: string; url?: string; score?: number; sent?: boolean }> = [];
@@ -276,15 +252,6 @@ async function buildContext(
     parts.push("=== PINNED PROJECT MEMORY ===");
     for (const n of memoryNotes) {
       parts.push(`## ${n.section}\n${escapeRecord(n.content)}`);
-    }
-  }
-
-  if (decisions.length > 0) {
-    parts.push("\n=== RECENT DECISIONS ===");
-    for (const d of decisions) {
-      parts.push(
-        `- ${d.decisionId} ${new Date(d.createdAt).toISOString().slice(0, 10)} — ${d.title}\n  why: ${d.rationale}`,
-      );
     }
   }
 
@@ -380,14 +347,6 @@ async function dispatchToolCall(
       return { ok: false, error: "Convex not configured" };
     }
 
-    if (name === "log_decision") {
-      const res = await convex.mutation(api.decisions.create, {
-        title: String(args.title ?? ""),
-        rationale: String(args.rationale ?? ""),
-        tags: Array.isArray(args.tags) ? (args.tags as string[]) : [],
-      });
-      return { ok: true, result: `Decision ${res.decisionId} logged.` };
-    }
     if (name === "add_component") {
       const res = await convex.mutation(api.components.create, {
         name: String(args.name ?? ""),
@@ -514,7 +473,7 @@ export async function POST(req: NextRequest) {
   }> = [];
 
   // Skip RAG for fully-specified action commands — all data is in the message itself.
-  const isStructuredAction = /^(add|log|record|update|remove|delete)\s+a?\s*(component|part|decision|test|memory)/i.test(userQuery.trim());
+  const isStructuredAction = /^(add|log|record|update|remove|delete)\s+a?\s*(component|part|test|memory)/i.test(userQuery.trim());
 
   // Enrich the RAG query with the last assistant turn for follow-up question context.
   // userQuery (raw) is intentionally kept separate — isStructuredAction must use the raw user message.
@@ -535,13 +494,21 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const history = body.messages.slice(-12);
+  // Keep last 12 messages but compress the older half: assistant turns beyond
+  // the verbatim tail are truncated to 300 chars to save tokens on long sessions.
+  const RAW_HISTORY = body.messages.slice(-12);
+  const VERBATIM_TAIL = 6;
+  const history = RAW_HISTORY.map((m, i) => {
+    if (i >= RAW_HISTORY.length - VERBATIM_TAIL || m.role !== "assistant") return m;
+    const text = asText(m.content);
+    return text.length > 300 ? { ...m, content: text.slice(0, 300) + " …" } : m;
+  });
   const lastIdx = history.length - 1;
 
   type UpstreamContent =
     | string
     | Array<
-        | { type: "text"; text: string }
+        | { type: "text"; text: string; cache_control?: { type: "ephemeral" } }
         | { type: "image_url"; image_url: { url: string } }
       >;
 
@@ -550,7 +517,11 @@ export async function POST(req: NextRequest) {
     content: UpstreamContent;
   }> = [];
 
-  upstreamMessages.push({ role: "system", content: SYSTEM_PROMPT });
+  // System prompt as a cached text block — static across all requests
+  upstreamMessages.push({
+    role: "system",
+    content: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+  });
 
   if (contextBlock) {
     upstreamMessages.push({
@@ -684,7 +655,7 @@ export async function POST(req: NextRequest) {
         // emit as plain text alongside the structured tool_calls field:
         //   • <tool_call>...</tool_call>  XML blocks
         //   • [web_search: ...]           bracket notation
-        const TOOL_NAMES = ["web_search","ask_clarification","log_decision","add_component","update_memory","log_test_result"];
+        const TOOL_NAMES = ["web_search","ask_clarification","add_component","update_memory","log_test_result"];
         const BRACKET_OPEN_RE = new RegExp(`\\[(${TOOL_NAMES.join("|")}):`,"i");
 
         let filterBuf = "";
@@ -970,7 +941,7 @@ export async function POST(req: NextRequest) {
           try {
             const cleanedText = assistantText
               .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
-              .replace(/\[(web_search|ask_clarification|log_decision|add_component|update_memory|log_test_result)[^\]]*\]/gi, "")
+              .replace(/\[(web_search|ask_clarification|add_component|update_memory|log_test_result)[^\]]*\]/gi, "")
               .replace(/\n{3,}/g, "\n\n")
               .trim();
             await convex.mutation(api.messages.send, {

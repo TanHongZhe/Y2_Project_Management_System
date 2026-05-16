@@ -82,93 +82,118 @@ export const search = action({
     ]);
     if (hits.length === 0 && textHits.length === 0) return { textChunks: [], imageChunks: [], allCandidates: [] };
 
+    // --- RRF (Reciprocal Rank Fusion) ---
+    // Combines vector-search rank and full-text-search rank into a single score.
+    // RRF_K=60 is the standard constant; chunks in both result sets score highest.
+    const RRF_K = 60;
+    const cosineById = new Map<string, number>(hits.map((h) => [h._id, h._score]));
+    const vectorRankById = new Map<string, number>(hits.map((h, i) => [h._id, i]));
+    const textRankById = new Map<string, number>(
+      (textHits as Doc<"chunks">[]).map((c, i) => [String(c._id), i])
+    );
+
+    const rrfScore = (id: string): number => {
+      const vRank = vectorRankById.get(id);
+      const tRank = textRankById.get(id);
+      return (vRank !== undefined ? 1 / (RRF_K + vRank) : 0) +
+             (tRank !== undefined ? 1 / (RRF_K + tRank) : 0);
+    };
+
+    // Fetch vector-result docs + any text-only hits not already in vector results
+    const vectorIds = new Set(hits.map((h) => h._id));
     const ids = hits.map((h) => h._id);
-    const scoreById = new Map<string, number>(hits.map((h) => [h._id, h._score]));
-    const chunks: Doc<"chunks">[] = await ctx.runQuery(internal.chunks.getByIds, { ids });
+    const vectorChunks: Doc<"chunks">[] = await ctx.runQuery(internal.chunks.getByIds, { ids });
+    const extraTextHits = (textHits as Doc<"chunks">[]).filter(
+      (c) => !vectorIds.has(c._id)
+    );
+    const allChunkDocs = [...vectorChunks, ...extraTextHits];
 
-    const textChunks: RagResult["textChunks"] = [];
-    const imageChunks: RagResult["imageChunks"] = [];
+    // Build unified pools keyed by _id so we can filter cleanly later
+    type ScoredTextChunk = RagResult["textChunks"][number] & { _id: string };
+    type ScoredImageChunk = RagResult["imageChunks"][number] & { _id: string };
 
-    for (const c of chunks) {
-      const score = scoreById.get(c._id) ?? 0;
+    const seenIds = new Set<string>();
+    const mergedText: ScoredTextChunk[] = [];
+    const mergedImages: ScoredImageChunk[] = [];
+
+    for (const c of allChunkDocs) {
+      const cid = String(c._id);
+      if (seenIds.has(cid)) continue;
+      seenIds.add(cid);
+      const rrf = rrfScore(cid);
+
       if (c.sourceType === "image" && c.storageId) {
         const url = (await ctx.storage.getUrl(c.storageId)) ?? "";
         if (url) {
-          imageChunks.push({
-            description: c.text,
-            documentName: c.documentName,
-            url,
-            chunkIndex: c.chunkIndex,
-            score,
-          });
+          mergedImages.push({ _id: cid, description: c.text, documentName: c.documentName, url, chunkIndex: c.chunkIndex, score: rrf });
         } else {
-          textChunks.push({
-            text: c.text,
-            documentName: c.documentName,
-            heading: c.heading,
-            chunkIndex: c.chunkIndex,
-            score,
-          });
+          mergedText.push({ _id: cid, text: c.text, documentName: c.documentName, heading: c.heading, chunkIndex: c.chunkIndex, score: rrf });
         }
       } else {
-        textChunks.push({
-          text: c.text,
-          documentName: c.documentName,
-          heading: c.heading,
-          chunkIndex: c.chunkIndex,
-          score,
-        });
+        mergedText.push({ _id: cid, text: c.text, documentName: c.documentName, heading: c.heading, chunkIndex: c.chunkIndex, score: rrf });
       }
     }
 
-    textChunks.sort((a, b) => b.score - a.score);
-    imageChunks.sort((a, b) => b.score - a.score);
+    mergedText.sort((a, b) => b.score - a.score);
+    mergedImages.sort((a, b) => b.score - a.score);
 
-    let filteredText = textChunks.filter((c) => c.score >= SCORE_THRESHOLD);
-    let filteredImages = imageChunks.filter((c) => c.score >= SCORE_THRESHOLD);
+    // --- Threshold filter ---
+    // Keep a chunk if its vector cosine is above threshold OR it had a text hit
+    // (text hits are exact-term matches and always trustworthy regardless of cosine).
+    let filteredText = mergedText.filter(
+      (c) => (cosineById.get(c._id) ?? 0) >= SCORE_THRESHOLD || textRankById.has(c._id)
+    );
+    let filteredImages = mergedImages.filter(
+      (c) => (cosineById.get(c._id) ?? 0) >= SCORE_THRESHOLD
+    );
 
-    // Enforce minimum of 1 result — always send the best chunk even if below threshold
+    // Enforce minimum of 1 result
     if (filteredText.length === 0 && filteredImages.length === 0) {
-      const topText = textChunks[0];
-      const topImage = imageChunks[0];
-      if (topText && (!topImage || topText.score >= topImage.score)) {
-        filteredText = [topText];
-      } else if (topImage) {
-        filteredImages = [topImage];
-      }
+      if (mergedText[0]) filteredText = [mergedText[0]];
+      else if (mergedImages[0]) filteredImages = [mergedImages[0]];
     }
 
-    // Build debug list: all vector candidates with whether they were sent to AI
+    // --- Adjacent chunk deduplication ---
+    // Chunks from the same document with consecutive chunkIndex values share overlap
+    // content. Keep only the higher-RRF-scored one (list is already sorted desc).
+    const dedupedText: ScoredTextChunk[] = [];
+    for (const c of filteredText) {
+      const hasNeighbour = dedupedText.some(
+        (d) => d.documentName === c.documentName && Math.abs(d.chunkIndex - c.chunkIndex) <= 1
+      );
+      if (!hasNeighbour) dedupedText.push(c);
+    }
+
+    // Build debug candidates list (strip internal _id before returning)
     const sentKeys = new Set([
-      ...filteredText.map((c) => `${c.documentName}:${c.chunkIndex}`),
+      ...dedupedText.map((c) => `${c.documentName}:${c.chunkIndex}`),
       ...filteredImages.map((c) => `${c.documentName}:${c.chunkIndex}`),
     ]);
-    const allCandidates = chunks
-      .map((c) => ({
-        documentName: c.documentName,
-        heading: c.heading,
-        score: scoreById.get(c._id) ?? 0,
-        sent: sentKeys.has(`${c.documentName}:${c.chunkIndex}`),
-      }))
+    // allCandidates is a debug/display list — use cosine scores so the UI shows
+    // familiar 0.32+ values. Text-only hits (not in vector results) get 0.68
+    // to match the previous artificial score convention.
+    const allCandidates = allChunkDocs
+      .filter((c, i, arr) => arr.findIndex((d) => d._id === c._id) === i)
+      .map((c) => {
+        const cid = String(c._id);
+        const cosine = cosineById.get(cid);
+        const displayScore = cosine !== undefined ? cosine : (textRankById.has(cid) ? 0.68 : 0);
+        return {
+          documentName: c.documentName,
+          heading: c.heading,
+          score: displayScore,
+          sent: sentKeys.has(`${c.documentName}:${c.chunkIndex}`),
+        };
+      })
       .sort((a, b) => b.score - a.score);
 
-    // Keyword-matched chunks not found by vector search (bypass threshold — explicit term match)
-    const vectorIds = new Set(ids.map(String));
-    const keywordOnly = (textHits as Doc<"chunks">[])
-      .filter((c) => !vectorIds.has(String(c._id)) && c.sourceType === "text")
-      .slice(0, 3);
+    // Hard cap: send at most 8 text chunks and 4 image chunks to the LLM.
+    // Fetching 16 from vector search gives a wider candidate pool for the
+    // threshold + dedup filters to work with, but we don't want to bloat context.
+    const finalText = dedupedText.slice(0, 8).map(({ _id: _dropped, ...rest }) => rest);
+    const finalImages = filteredImages.slice(0, 4).map(({ _id: _dropped, ...rest }) => rest);
 
-    for (const c of keywordOnly) {
-      filteredText.push({
-        text: c.text,
-        documentName: c.documentName,
-        heading: c.heading,
-        chunkIndex: c.chunkIndex,
-        score: 0.68,
-      });
-    }
-
-    return { textChunks: filteredText, imageChunks: filteredImages, allCandidates };
+    return { textChunks: finalText, imageChunks: finalImages, allCandidates };
   },
 });
 
