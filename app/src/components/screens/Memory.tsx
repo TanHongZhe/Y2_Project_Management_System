@@ -100,7 +100,6 @@ export default function Memory({ readOnly, searchBar, currentUserId }: { readOnl
         </div>
         <div className="actions">
           {searchBar}
-          <button className="btn ghost sm"><Icons.Eye /><span>Raw markdown</span></button>
           {!readOnly && (
             <button className="btn primary sm" onClick={() => setShowNew(s => !s)}>
               <Icons.Plus /><span>New section</span>

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useQuery, useMutation } from 'convex/react';
+import { useQuery, useMutation, useAction } from 'convex/react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Table } from '@tiptap/extension-table';
@@ -165,6 +165,7 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const triggerAriaFromNote = useMutation((api as any).teamChat.triggerAriaFromNote);
   /* eslint-enable @typescript-eslint/no-explicit-any */
+  const ingestNote = useAction(api.noteChunks.ingestNote);
   const toast = useToast();
 
   const [selectedId, setSelectedId] = useState<Id<"meetingNotes"> | null>(null);
@@ -175,7 +176,6 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [savedRecently, setSavedRecently] = useState(false);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string>>(new Set());
   const pendingDeleteTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -203,6 +203,33 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
   const ariaTriggeredNotes = useRef<Set<string>>(new Set());
   // Stores the pending Aria trigger so it can fire on unmount if debounce hasn't elapsed
   const pendingAriaRef = useRef<{ content: string; noteId: Id<"meetingNotes"> } | null>(null);
+  // Auto-ingest into noteChunks: 30s debounce, flushes on selection change / unmount
+  const ingestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingIngestRef = useRef<{ id: Id<"meetingNotes">; content: string; section: string } | null>(null);
+  const [ingestInFlight, setIngestInFlight] = useState(false);
+
+  async function runIngest(id: Id<"meetingNotes">, content: string, section: string) {
+    setIngestInFlight(true);
+    try {
+      await ingestNote({ noteId: id, content, section });
+    } finally {
+      setIngestInFlight(false);
+    }
+  }
+
+  function schedulePendingIngest(id: Id<"meetingNotes">, content: string, section: string) {
+    pendingIngestRef.current = { id, content, section };
+    if (ingestTimerRef.current) clearTimeout(ingestTimerRef.current);
+    ingestTimerRef.current = setTimeout(firePendingIngest, 30_000);
+  }
+
+  function firePendingIngest() {
+    if (ingestTimerRef.current) { clearTimeout(ingestTimerRef.current); ingestTimerRef.current = null; }
+    const p = pendingIngestRef.current;
+    if (!p) return;
+    pendingIngestRef.current = null;
+    void runIngest(p.id, p.content, p.section);
+  }
   // Tracks the last server content we've observed for the selected note. Used to
   // detect external edits (e.g. Aria appending/refining) so we can pull them into
   // the editor without clobbering an in-flight local save.
@@ -215,6 +242,26 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
     api.meetings.getAudioUrl,
     selectedMeeting?.audioStorageId ? { storageId: selectedMeeting.audioStorageId } : 'skip',
   );
+  // Stored hash from the noteChunks table — used to derive a persistent
+  // "Indexed ✓" indicator that survives page reloads / navigation.
+  const storedHash = useQuery(
+    api.noteChunks.getStoredHash,
+    selectedId ? { noteId: selectedId } : 'skip',
+  );
+  const [contentHash, setContentHash] = useState<string | null>(null);
+  useEffect(() => {
+    const text = (selectedMeeting?.content ?? '').trim();
+    if (!text) { setContentHash(null); return; }
+    let cancelled = false;
+    void (async () => {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+      const hex = Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
+      if (!cancelled) setContentHash(hex);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedMeeting?.content]);
+  const isIndexed = !!(storedHash && contentHash && storedHash === contentHash);
+  const isSaved = !!(selectedMeeting && content === selectedMeeting.content);
 
   // 1 recording per meeting — disable Record once we have audio (locally or persisted).
   const hasAudio = !!selectedMeeting?.audioStorageId || !!localAudioUrl;
@@ -278,6 +325,12 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
     setRecordBlocked(false);
   }, [selectedId]);
 
+  // Flush any pending note ingest when selectedId changes or the component unmounts
+  useEffect(() => {
+    return () => { firePendingIngest(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
   // Pull in external edits (Aria append/refine) when the server content changes
   // out from under us. Skips while a local save is pending so we don't clobber
   // an in-flight edit. Also re-arms the @aria-per-note guard so a fresh @aria
@@ -335,7 +388,6 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
   function scheduleSave(patch: Partial<{ title: string; content: string; attendees: string[]; date: number }>) {
     if (!selectedId || readOnly) return;
     setIsSaving(true);
-    setSavedRecently(false);
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       // Clear the handle so the external-sync effect can tell a save is no
@@ -343,8 +395,6 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
       saveTimer.current = null;
       void update({ id: selectedId!, ...patch, editorId: currentUser.id }).then(() => {
         setIsSaving(false);
-        setSavedRecently(true);
-        setTimeout(() => setSavedRecently(false), 2000);
       });
     }, 800);
   }
@@ -543,9 +593,36 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
     setRecording(false);
   }
 
+  // Splits accumulated 500 ms MediaRecorder chunks into blobs that each stay under
+  // Whisper's 25 MB hard limit. chunks[0] is always the WebM initialization segment
+  // (EBML header + codec metadata); it must be prepended to every subsequent group so
+  // each blob is a self-contained, decodable WebM file.
+  const WHISPER_MAX = 22 * 1024 * 1024; // 22 MB — leaves margin under the 25 MB cap
+  function splitIntoWhisperChunks(chunks: Blob[], mimeType: string): Blob[] {
+    const total = chunks.reduce((s, c) => s + c.size, 0);
+    if (total <= WHISPER_MAX || chunks.length <= 1) return [new Blob(chunks, { type: mimeType })];
+    const initChunk = chunks[0];
+    const segments: Blob[] = [];
+    let group: Blob[] = [initChunk];
+    let groupSize = initChunk.size;
+    for (const chunk of chunks.slice(1)) {
+      if (groupSize + chunk.size > WHISPER_MAX && group.length > 1) {
+        segments.push(new Blob(group, { type: mimeType }));
+        group = [initChunk, chunk];
+        groupSize = initChunk.size + chunk.size;
+      } else {
+        group.push(chunk);
+        groupSize += chunk.size;
+      }
+    }
+    if (group.length > 1 || segments.length === 0) segments.push(new Blob(group, { type: mimeType }));
+    return segments;
+  }
+
   async function handleRecordingStop() {
     if (chunksRef.current.length === 0) return;
     const mimeType = chunksRef.current[0]?.type || 'audio/webm';
+    const segments = splitIntoWhisperChunks(chunksRef.current, mimeType);
     const blob = new Blob(chunksRef.current, { type: mimeType });
     chunksRef.current = [];
 
@@ -582,19 +659,23 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
     setTranscribeError(null);
     try {
       const ext = mimeType.includes('ogg') ? 'ogg' : mimeType.includes('mp4') ? 'mp4' : 'webm';
-      const fd = new FormData();
-      fd.append("audio", blob, `recording.${ext}`);
-      const res = await fetch("/api/transcribe", { method: "POST", body: fd });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as { error: string; detail?: string };
-        console.error("[transcribe] API error:", err.error, err.detail ?? "");
-        throw new Error(err.error);
+      const transcripts: string[] = [];
+      for (let i = 0; i < segments.length; i++) {
+        const fd = new FormData();
+        fd.append('audio', segments[i], `recording_part${i + 1}.${ext}`);
+        const res = await fetch('/api/transcribe', { method: 'POST', body: fd });
+        if (!res.ok) {
+          const err = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as { error: string; detail?: string };
+          console.error(`[transcribe] segment ${i + 1}/${segments.length} failed:`, err.error, err.detail ?? '');
+          continue;
+        }
+        const data = (await res.json()) as { transcript: string };
+        if (data.transcript?.trim()) transcripts.push(data.transcript.trim());
       }
-      const data = (await res.json()) as { transcript: string };
-      const raw = data.transcript?.trim();
+      const raw = transcripts.join('\n\n');
       if (!raw) return;
 
-      // Polish the raw transcript before inserting into notes
+      // Polish the combined transcript before inserting into notes
       setTranscribing(false);
       setPolishing(true);
       let finalText = raw;
@@ -808,11 +889,6 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
                       );
                     })()}
                   </div>
-                  {!readOnly && (
-                    <span className="autosave-indicator" aria-live="polite">
-                      {isSaving ? 'Saving…' : savedRecently ? 'Saved ✓' : ''}
-                    </span>
-                  )}
                 </div>
               ) : (
                 /* Meetings: full attendees picker + audio */
@@ -851,11 +927,6 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
                       )}
                     </div>
                   )}
-                  {!readOnly && (
-                    <span className="autosave-indicator" aria-live="polite">
-                      {isSaving ? 'Saving…' : savedRecently ? 'Saved ✓' : ''}
-                    </span>
-                  )}
                 </div>
               )}
 
@@ -869,6 +940,7 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
                   setContent(md);
                   scheduleSave({ content: md });
                   scheduleMentionCheck(md);
+                  if (selectedId) schedulePendingIngest(selectedId, md, title);
                 }}
               />
 
@@ -895,21 +967,28 @@ export default function Meetings({ currentUser, readOnly, searchBar, selectedMee
               <div className="meeting-footer-row">
                 <div className="meeting-footer-left">
                   {!readOnly && (
-                    <>
-                      <button
-                        className="btn primary sm"
-                        disabled={syncing || !content.trim()}
-                        onClick={handleSyncToMemory}
-                      >
-                        {syncing ? "Syncing…" : "Send to Project Memory"}
-                      </button>
-                      <button className="btn sm" style={{ color: "var(--danger)" }} onClick={handleDelete}>
-                        Delete
-                      </button>
-                    </>
+                    <button className="btn sm" style={{ color: "var(--danger)" }} onClick={handleDelete}>
+                      Delete
+                    </button>
                   )}
                 </div>
                 <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  {!readOnly && (
+                    <span
+                      aria-live="polite"
+                      style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: ingestInFlight ? 'var(--text-muted)' : 'var(--accent, #22c55e)', minWidth: 60, textAlign: 'right' }}
+                    >
+                      {ingestInFlight ? 'Indexing…' : isIndexed ? 'Indexed ✓' : ''}
+                    </span>
+                  )}
+                  {!readOnly && (
+                    <span
+                      aria-live="polite"
+                      style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: isSaving ? 'var(--text-muted)' : 'var(--accent, #22c55e)', minWidth: 52, textAlign: 'right' }}
+                    >
+                      {isSaving ? 'Saving…' : isSaved ? 'Saved ✓' : ''}
+                    </span>
+                  )}
                   {selectedMeeting.sources && selectedMeeting.sources.length > 0 && (
                     <NoteSources sources={selectedMeeting.sources} />
                   )}

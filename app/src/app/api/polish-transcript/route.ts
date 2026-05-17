@@ -86,7 +86,7 @@ ${transcript}`;
     "X-Title": "Y2 PMS",
   };
   const orBody = (model: string) =>
-    JSON.stringify({ model, messages: [{ role: "user", content: prompt }], temperature: 0.2, max_tokens: 4096 });
+    JSON.stringify({ model, messages: [{ role: "user", content: prompt }], temperature: 0.2, max_tokens: 16000 });
 
   let upstream: Response;
   try {

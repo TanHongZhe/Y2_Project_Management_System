@@ -20,6 +20,7 @@ import type * as ingest from "../ingest.js";
 import type * as meetings from "../meetings.js";
 import type * as memoryNotes from "../memoryNotes.js";
 import type * as messages from "../messages.js";
+import type * as noteChunks from "../noteChunks.js";
 import type * as notifications from "../notifications.js";
 import type * as overview from "../overview.js";
 import type * as progressImages from "../progressImages.js";
@@ -49,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   meetings: typeof meetings;
   memoryNotes: typeof memoryNotes;
   messages: typeof messages;
+  noteChunks: typeof noteChunks;
   notifications: typeof notifications;
   overview: typeof overview;
   progressImages: typeof progressImages;

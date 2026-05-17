@@ -73,14 +73,20 @@ export const search = action({
       return { textChunks: [], imageChunks: [], allCandidates: [] };
     }
 
-    const [hits, textHits] = await Promise.all([
+    const [hits, textHits, noteHits, noteTextHits] = await Promise.all([
       ctx.vectorSearch("chunks", "by_embedding", {
         vector,
         limit: limit ?? 16,
       }),
       ctx.runQuery(internal.chunks.searchByText, { query, limit: 5 }),
+      ctx.vectorSearch("noteChunks", "by_embedding", {
+        vector,
+        limit: 8,
+      }),
+      ctx.runQuery(internal.noteChunks.searchByText, { query, limit: 3 }),
     ]);
-    if (hits.length === 0 && textHits.length === 0) return { textChunks: [], imageChunks: [], allCandidates: [] };
+    if (hits.length === 0 && textHits.length === 0 && noteHits.length === 0 && noteTextHits.length === 0)
+      return { textChunks: [], imageChunks: [], allCandidates: [] };
 
     // --- RRF (Reciprocal Rank Fusion) ---
     // Combines vector-search rank and full-text-search rank into a single score.
@@ -190,10 +196,70 @@ export const search = action({
     // Hard cap: send at most 8 text chunks and 4 image chunks to the LLM.
     // Fetching 16 from vector search gives a wider candidate pool for the
     // threshold + dedup filters to work with, but we don't want to bloat context.
-    const finalText = dedupedText.slice(0, 8).map(({ _id: _dropped, ...rest }) => rest);
+    const docText = dedupedText.slice(0, 8).map(({ _id: _dropped, ...rest }) => rest);
     const finalImages = filteredImages.slice(0, 4).map(({ _id: _dropped, ...rest }) => rest);
 
-    return { textChunks: finalText, imageChunks: finalImages, allCandidates };
+    // ── Note chunk search (parallel path) ───────────────────────────────────
+    // Run the same RRF + threshold logic on noteChunks and merge into textChunks.
+    const noteExtraText: RagResult["textChunks"] = [];
+    // Keep chunkIndex alongside during computation so we can build sentKeys; stripped before returning.
+    const noteCandidatesRaw: Array<{ documentName: string; heading: undefined; score: number; chunkIndex: number }> = [];
+
+    if (noteHits.length > 0 || (noteTextHits as Doc<"noteChunks">[]).length > 0) {
+      const noteCosineById = new Map<string, number>(noteHits.map((h) => [h._id, h._score]));
+      const noteVectorRank = new Map<string, number>(noteHits.map((h, i) => [h._id, i]));
+      const noteTextRank = new Map<string, number>(
+        (noteTextHits as Doc<"noteChunks">[]).map((c, i) => [String(c._id), i]),
+      );
+      const noteRrf = (id: string) =>
+        (noteVectorRank.has(id) ? 1 / (RRF_K + noteVectorRank.get(id)!) : 0) +
+        (noteTextRank.has(id) ? 1 / (RRF_K + noteTextRank.get(id)!) : 0);
+
+      const noteVectorIds = new Set(noteHits.map((h) => h._id));
+      const fetchedNoteDocs = await ctx.runQuery(internal.noteChunks.getByIds, {
+        ids: noteHits.map((h) => h._id),
+      });
+      const extraNoteTextDocs = (noteTextHits as Doc<"noteChunks">[]).filter(
+        (c) => !noteVectorIds.has(c._id),
+      );
+      const allNoteDocs = [
+        ...fetchedNoteDocs.filter((d): d is Doc<"noteChunks"> => d !== null),
+        ...extraNoteTextDocs,
+      ];
+
+      const seenNoteIds = new Set<string>();
+      for (const c of allNoteDocs) {
+        const cid = String(c._id);
+        if (seenNoteIds.has(cid)) continue;
+        seenNoteIds.add(cid);
+        const cosine = noteCosineById.get(cid) ?? 0;
+        const rrf = noteRrf(cid);
+        const docName = `Note: ${c.section}`;
+        noteCandidatesRaw.push({ documentName: docName, heading: undefined, score: cosine || (noteTextRank.has(cid) ? 0.68 : 0), chunkIndex: c.chunkIndex });
+        if (cosine >= SCORE_THRESHOLD || noteTextRank.has(cid)) {
+          noteExtraText.push({ text: c.text, documentName: docName, heading: undefined, chunkIndex: c.chunkIndex, score: rrf });
+        }
+      }
+      noteExtraText.sort((a, b) => b.score - a.score);
+    }
+
+    // Merge doc + note text chunks, re-sort, cap at 8 total
+    const finalText = [...docText, ...noteExtraText]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8);
+
+    // Update 'sent' flags on noteCandidatesRaw now that we know the final set, then strip chunkIndex.
+    const finalSentKeys = new Set(finalText.map((c) => `${c.documentName}:${c.chunkIndex}`));
+    const finalNoteCandidates: RagResult["allCandidates"] = noteCandidatesRaw.map(({ chunkIndex, ...c }) => ({
+      ...c,
+      sent: finalSentKeys.has(`${c.documentName}:${chunkIndex}`),
+    }));
+
+    return {
+      textChunks: finalText,
+      imageChunks: finalImages,
+      allCandidates: [...allCandidates, ...finalNoteCandidates].sort((a, b) => b.score - a.score),
+    };
   },
 });
 

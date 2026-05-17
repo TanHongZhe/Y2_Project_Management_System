@@ -5020,6 +5020,12 @@ input[type="range"]::-moz-range-thumb {
   border-color: var(--accent);
 }
 
+.meeting-date-field::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 0.8;
+  cursor: pointer;
+}
+
 .meeting-attendees-row {
   display: flex;
   align-items: center;

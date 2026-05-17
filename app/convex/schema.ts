@@ -45,6 +45,24 @@ export default defineSchema({
       dimensions: 1536,
     }),
 
+  noteChunks: defineTable({
+    // Accepts both old memoryNotes IDs (legacy rows from when this was a Memory feature)
+    // and new meetingNotes IDs (current). Clear legacy rows by running `noteChunks:clearAll`
+    // from the Convex dashboard once, then narrow this back to v.id("meetingNotes") only.
+    noteId: v.union(v.id("memoryNotes"), v.id("meetingNotes")),
+    section: v.string(),
+    text: v.string(),
+    embedding: v.array(v.number()),
+    chunkIndex: v.number(),
+    contentHash: v.string(),
+  })
+    .index("by_note", ["noteId"])
+    .searchIndex("search_text", { searchField: "text" })
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: 1536,
+    }),
+
   memoryNotes: defineTable({
     section: v.string(),
     content: v.string(),
