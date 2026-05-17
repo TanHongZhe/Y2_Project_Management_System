@@ -32,6 +32,7 @@ interface Tweaks {
   surface: string;
   dense: boolean;
   debug: boolean;
+  buddySprite: string;
 }
 
 const TWEAK_DEFAULTS: Tweaks = {
@@ -41,6 +42,7 @@ const TWEAK_DEFAULTS: Tweaks = {
   surface: "clean",
   dense: false,
   debug: false,
+  buddySprite: "capybara",
 };
 
 const ROUTE_LABELS: Record<string, string> = {
@@ -326,6 +328,7 @@ export default function App() {
           if (r === 'meetings' && id) setSelectedMeetingId(id);
           setRoute(r);
         }}
+        buddySprite={tweaks.buddySprite}
       />
     </ToastProvider>
   );

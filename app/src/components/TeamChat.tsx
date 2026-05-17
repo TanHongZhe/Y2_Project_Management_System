@@ -15,6 +15,7 @@ interface TeamChatProps {
   onNavigate: (route: string, id?: string) => void;
   isOpen: boolean;
   onToggle: () => void;
+  buddySprite?: string;
 }
 
 const ARIA_USER = USERS.find((u) => u.isAria)!;
@@ -78,8 +79,6 @@ function fmtRelative(ts: number): string {
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
   return new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
-
-const LS_SEEN_KEY = 'pms-chat-seen';
 
 interface MentionDropState {
   type: 'mention';
@@ -149,18 +148,21 @@ function renderMessageContent(
   });
 }
 
-export default function TeamChat({ currentUser, onNavigate, isOpen, onToggle }: TeamChatProps) {
+const BUDDY_SPRITES = ['capybara', 'panda', 'hedgehog'] as const;
+function pickSprite(s: string): string {
+  return s === 'random' ? BUDDY_SPRITES[Math.floor(Math.random() * BUDDY_SPRITES.length)] : s;
+}
+
+export default function TeamChat({ currentUser, onNavigate, isOpen, onToggle, buddySprite = 'capybara' }: TeamChatProps) {
   const [activeThreadId, setActiveThreadId] = useState<Id<'chatThreads'> | null>(null);
-  const [lastSeenAt, setLastSeenAt] = useState<number>(() => {
-    try { return parseInt(localStorage.getItem(LS_SEEN_KEY) ?? '0', 10) || 0; } catch { return 0; }
-  });
-  const [threadSeen, setThreadSeen] = useState<Record<string, number>>(() => {
-    try { return JSON.parse(localStorage.getItem('pms-thread-seen') ?? '{}') as Record<string, number>; } catch { return {}; }
-  });
   const [inputVal, setInputVal] = useState('');
   const [dropState, setDropState] = useState<DropState | null>(null);
   const [attachedNotes, setAttachedNotes] = useState<Array<{ _id: string; title: string }>>([]);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [capySpinning, setCapySpinning] = useState(false);
+  const [capyIdling, setCapyIdling] = useState(false);
+  const [resolvedSprite, setResolvedSprite] = useState(() => pickSprite(buddySprite));
+  const capyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dropRef = useRef<DropState | null>(null);
   dropRef.current = dropState;
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -185,23 +187,31 @@ export default function TeamChat({ currentUser, onNavigate, isOpen, onToggle }: 
     activeThreadId ? { threadId: activeThreadId } : 'skip',
   ) ?? []) as any[];
   const allNotes = (useQuery(api.meetings.list, {}) ?? []) as Array<{ _id: string; title: string; source?: string }>;
+  const userChatState = useQuery(
+    (api as any).teamChat.getUserChatState,
+    { userId: currentUser.id },
+  ) as { panelLastSeenAt: number } | null | undefined;
 
   const getOrCreateGroup = useMutation((api as any).teamChat.getOrCreateGroup);
   const getOrCreateDm = useMutation((api as any).teamChat.getOrCreateDm);
   const sendMessage = useMutation((api as any).teamChat.sendMessage);
   const clearThread = useMutation((api as any).teamChat.clearThread);
+  const markThreadRead = useMutation((api as any).teamChat.markThreadRead);
+  const markPanelSeen = useMutation((api as any).teamChat.markPanelSeen);
 
-  function markSeen() {
-    const now = Date.now();
-    setLastSeenAt(now);
-    try { localStorage.setItem(LS_SEEN_KEY, String(now)); } catch {}
-  }
-
-  // Mark seen whenever chat opens (clears the collapsed pill badge)
+  // Outer pill badge tracking. Fire markPanelSeen on every open↔close transition,
+  // plus on mount-when-open. Skip mount-when-closed so a page refresh while the
+  // pill is collapsed does NOT silently clear unread state the user hasn't
+  // actually looked at — that was a latent bug in the previous localStorage
+  // implementation, where every mount stamped lastSeenAt=now regardless of isOpen.
+  const prevIsOpenRef = useRef(isOpen);
   useEffect(() => {
-    markSeen();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+    const wasOpen = prevIsOpenRef.current;
+    prevIsOpenRef.current = isOpen;
+    if (isOpen || wasOpen) {
+      void markPanelSeen({ userId: currentUser.id });
+    }
+  }, [isOpen, currentUser.id, markPanelSeen]);
 
   // Scroll to bottom instantly whenever the panel opens (even if already in a thread)
   useEffect(() => {
@@ -212,9 +222,10 @@ export default function TeamChat({ currentUser, onNavigate, isOpen, onToggle }: 
   }, [isOpen]);
 
   // Badge only for threads where someone ELSE sent the last message after we last saw it
+  const panelLastSeenAt = userChatState?.panelLastSeenAt ?? 0;
   const unreadCount = isOpen ? 0 : threads.filter((t: any) =>
     t.lastMessageAt &&
-    t.lastMessageAt > lastSeenAt &&
+    t.lastMessageAt > panelLastSeenAt &&
     t.lastAuthorId !== currentUser.id
   ).length;
 
@@ -229,42 +240,28 @@ export default function TeamChat({ currentUser, onNavigate, isOpen, onToggle }: 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length]);
 
-  // Focus input when thread opens; mark thread as seen; reset scroll tracking
+  // Focus input when thread opens; mark thread as read on the server; reset scroll tracking.
+  // Cleanup on leave stamps a 6s forward-looking grace so Aria's reply chain
+  // (thinking + 2 paragraphs + "View Note" footer can land 1-3s after click-back)
+  // doesn't immediately re-light the dot. A real teammate message arriving
+  // after the window will correctly relight it on their next send.
   useEffect(() => {
     if (activeThreadId) {
       prevMessagesLengthRef.current = 0;
       followBottomRef.current = true;
       setShowScrollDown(false);
-      const threadId = activeThreadId as string;
-      const now = Date.now();
-      setThreadSeen((prev) => {
-        const next = { ...prev, [threadId]: now };
-        try { localStorage.setItem('pms-thread-seen', JSON.stringify(next)); } catch {}
-        return next;
-      });
       setAttachedNotes([]);
       setDropState(null);
       setTimeout(() => inputRef.current?.focus(), 80);
+      const tid = activeThreadId as Id<'chatThreads'>;
+      void markThreadRead({ threadId: tid, userId: currentUser.id, grace: 0 });
     }
-    // Cleanup on leave/unmount: stamp the thread as seen with a forward-looking
-    // grace window. Aria's chat replies arrive as two paragraphs ~1s apart,
-    // plus a thinking line and "View Note" footer for note tasks — the tail of
-    // that chain can land a few seconds after the user clicks back, and a
-    // straight `Date.now()` stamp would let those late paragraphs re-light the
-    // unread dot for messages the user already saw. 6s easily covers Aria's
-    // longest reply sequence; a real teammate message that lands inside that
-    // window will simply re-light the dot when they send their NEXT message.
     return () => {
       if (!activeThreadId) return;
-      const tid = activeThreadId as string;
-      const stamp = Date.now() + 6000;
-      setThreadSeen((prev) => {
-        const next = { ...prev, [tid]: stamp };
-        try { localStorage.setItem('pms-thread-seen', JSON.stringify(next)); } catch {}
-        return next;
-      });
+      const tid = activeThreadId as Id<'chatThreads'>;
+      void markThreadRead({ threadId: tid, userId: currentUser.id, grace: 6000 });
     };
-  }, [activeThreadId]);
+  }, [activeThreadId, currentUser.id, markThreadRead]);
 
   const openGroup = useCallback(async () => {
     const id = await getOrCreateGroup({});
@@ -410,26 +407,12 @@ export default function TeamChat({ currentUser, onNavigate, isOpen, onToggle }: 
     return other ? getUserById(other) : null;
   }
 
-  // Keep thread-seen timestamp current while the user is actively reading —
-  // prevents Aria's replies from re-triggering the unread dot after they've been seen.
-  useEffect(() => {
-    if (!activeThreadId || messages.length === 0) return;
-    const threadId = activeThreadId as string;
-    const now = Date.now();
-    setThreadSeen((prev) => {
-      const next = { ...prev, [threadId]: now };
-      try { localStorage.setItem('pms-thread-seen', JSON.stringify(next)); } catch {}
-      return next;
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeThreadId, messages.length]);
-
   function hasUnread(t: any): boolean {
     if (t._id === activeThreadId) return false; // currently reading
-    const lastSeen = threadSeen[t._id] ?? 0;
+    const lastRead = t.readBy?.[currentUser.id] ?? 0;
     return !!(
       t.lastMessageAt &&
-      t.lastMessageAt > lastSeen &&
+      t.lastMessageAt > lastRead &&
       t.lastAuthorId !== currentUser.id
     );
   }
@@ -437,13 +420,43 @@ export default function TeamChat({ currentUser, onNavigate, isOpen, onToggle }: 
   async function handleClearThread() {
     if (!activeThreadId || !activeOther?.isAria) return;
     await clearThread({ threadId: activeThreadId });
-    const threadId = activeThreadId as string;
-    setThreadSeen((prev) => {
-      const next = { ...prev, [threadId]: Date.now() };
-      try { localStorage.setItem('pms-thread-seen', JSON.stringify(next)); } catch {}
-      return next;
-    });
+    void markThreadRead({ threadId: activeThreadId, userId: currentUser.id, grace: 0 });
   }
+
+  function handleCapyClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    setCapyIdling(false);
+    if (capyTimerRef.current) clearTimeout(capyTimerRef.current);
+    setCapySpinning(true);
+    capyTimerRef.current = setTimeout(() => {
+      setCapySpinning(false);
+      capyTimerRef.current = null;
+    }, 2800);
+  }
+
+  // Re-resolve sprite (re-rolls random) whenever the setting changes
+  useEffect(() => {
+    setResolvedSprite(pickSprite(buddySprite));
+  }, [buddySprite]);
+
+  // Random idle nudge: play one hover cycle at a random interval (5–30 s)
+  useEffect(() => {
+    if (buddySprite === 'none') return;
+    let id: ReturnType<typeof setTimeout>;
+    function loop() {
+      id = setTimeout(() => {
+        setCapyIdling(true);
+        setTimeout(() => setCapyIdling(false), 850);
+        loop();
+      }, 5_000 + Math.random() * 25_000);
+    }
+    loop();
+    return () => clearTimeout(id);
+  }, [buddySprite]);
+
+  useEffect(() => {
+    return () => { if (capyTimerRef.current) clearTimeout(capyTimerRef.current); };
+  }, []);
 
   function handleMsgsScroll() {
     const el = msgsRef.current;
@@ -490,6 +503,16 @@ export default function TeamChat({ currentUser, onNavigate, isOpen, onToggle }: 
     <div className={'tc-root' + (isOpen ? ' open' : '')}>
       {/* ── Collapsed pill ─────────────────────────────────────── */}
       {!isOpen && (
+        <>
+        {/* Pixel buddy sitting above the pill — hover/idle to animate, click to spin */}
+        {buddySprite !== 'none' && (
+          <div
+            className={`capy-sprite${capyIdling ? ' capy-idling' : ''}${capySpinning ? ' capy-spinning' : ''}`}
+            onClick={handleCapyClick}
+            title="(◕‿◕)"
+            style={{ backgroundImage: `url('/${resolvedSprite}_sprite.png')` }}
+          />
+        )}
         <button className="tc-pill" onClick={onToggle} title="Team chat (C)">
           {unreadCount > 0 && (
             <span className="tc-unread-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>
@@ -507,6 +530,7 @@ export default function TeamChat({ currentUser, onNavigate, isOpen, onToggle }: 
           </div>
           <span className="tc-pill-label">Team</span>
         </button>
+        </>
       )}
 
       {/* ── Expanded panel ─────────────────────────────────────── */}

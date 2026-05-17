@@ -13,6 +13,7 @@ interface Tweaks {
   surface: string;
   dense: boolean;
   debug: boolean;
+  buddySprite: string;
 }
 
 interface SettingsProps {
@@ -208,6 +209,69 @@ export default function Settings({ tweaks, setTweak, selectedThreadId, searchBar
               <div className="model-picker">
                 <button className={tweaks.density === "comfortable" ? "active" : ""} onClick={() => setTweak("density", "comfortable")}>Comfortable</button>
                 <button className={tweaks.density === "compact" ? "active" : ""} onClick={() => setTweak("density", "compact")}>Compact</button>
+              </div>
+            </div>
+            <div className="settings-row">
+              <div className="label-block">
+                <div className="l">Team buddy</div>
+                <div className="h">Pixel pal that sits above the Team chat button.</div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {([
+                  { key: 'capybara', label: 'Capybara', sprite: 'capybara' },
+                  { key: 'panda',    label: 'Panda',    sprite: 'panda' },
+                  { key: 'hedgehog', label: 'Hedgehog', sprite: 'hedgehog' },
+                  { key: 'random',   label: 'Random',   sprite: null },
+                  { key: 'none',     label: 'None',     sprite: null },
+                ] as const).map(({ key, label, sprite }) => {
+                  const active = tweaks.buddySprite === key;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => setTweak('buddySprite', key)}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '6px 8px',
+                        border: active ? '2px solid var(--accent)' : '1px solid var(--line)',
+                        borderRadius: 8,
+                        background: active ? 'var(--bg-sunk)' : 'transparent',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {sprite ? (
+                        <div style={{
+                          width: 48,
+                          height: 52,
+                          backgroundImage: `url('/${sprite}_sprite.png')`,
+                          backgroundSize: '192px 208px',
+                          backgroundPosition: '0 0',
+                          backgroundRepeat: 'no-repeat',
+                          imageRendering: 'pixelated',
+                        }} />
+                      ) : (
+                        <div style={{
+                          width: 48,
+                          height: 52,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          border: '1px dashed var(--line)',
+                          borderRadius: 6,
+                          fontSize: 22,
+                          color: 'var(--text-muted)',
+                        }}>
+                          {key === 'random' ? <Icons.Shuffle size={22} /> : '✕'}
+                        </div>
+                      )}
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: active ? 600 : 400 }}>
+                        {label}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>

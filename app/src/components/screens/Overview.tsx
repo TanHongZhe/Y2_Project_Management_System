@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
@@ -106,14 +107,21 @@ function AssigneePicker({
   onToggle: (userId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [dropPos, setDropPos] = useState({ top: 0, left: 0 });
+  const [dropPos, setDropPos] = useState<{ top?: number; bottom?: number; left: number }>({ left: 0 });
   const triggerRef = useRef<HTMLDivElement>(null);
   const dropRef = useRef<HTMLDivElement>(null);
 
   const handleOpen = useCallback(() => {
     if (triggerRef.current) {
       const r = triggerRef.current.getBoundingClientRect();
-      setDropPos({ top: r.bottom + 4, left: r.left });
+      const GAP = 4;
+      const DROPDOWN_MAX_H = 260;
+      const spaceBelow = window.innerHeight - r.bottom - GAP;
+      if (spaceBelow < DROPDOWN_MAX_H && r.top > spaceBelow) {
+        setDropPos({ bottom: window.innerHeight - r.top + GAP, left: r.left });
+      } else {
+        setDropPos({ top: r.bottom + GAP, left: r.left });
+      }
     }
     setOpen(v => !v);
   }, []);
@@ -147,11 +155,11 @@ function AssigneePicker({
           <Icons.Plus size={9} />
         </div>
       </div>
-      {open && (
+      {open && createPortal(
         <div
           ref={dropRef}
           className="apicker-drop"
-          style={{ position: "fixed", top: dropPos.top, left: dropPos.left, zIndex: 9999 }}
+          style={{ position: "fixed", top: dropPos.top ?? 'auto', bottom: dropPos.bottom ?? 'auto', left: dropPos.left, zIndex: 9999 }}
         >
           {USERS.map(u => {
             const picked = assignedTo.includes(u.id);
@@ -167,7 +175,8 @@ function AssigneePicker({
               </div>
             );
           })}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

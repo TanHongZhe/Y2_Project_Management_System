@@ -8229,3 +8229,58 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 50%;
   border: 1.5px solid var(--bg-elev);
 }
+
+/* ── Capybara sprite ──────────────────────────────────────────────────────── */
+/* 4×4 sprite sheet (1984×2136 px), display frame = 48×52 px                 */
+/* Rows 0-1 = idle bob (hover), rows 2-3 = excited spin (click)              */
+.capy-sprite {
+  width: 48px;
+  height: 52px;
+  background-image: url('/capybara_sprite.png');
+  background-size: 192px 208px;
+  background-position: 0px 0px;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-bottom: -10px;
+  margin-right: 5px;
+  position: relative;
+  z-index: 1;
+  transition: none;
+}
+
+/* one-shot idle nudge — overridden by hover or spin */
+.capy-sprite.capy-idling {
+  animation: capy-hover 0.8s steps(1, end) 1;
+}
+
+.capy-sprite:hover {
+  animation: capy-hover 0.8s steps(1, end) infinite;
+}
+
+.capy-sprite.capy-spinning {
+  animation: capy-spin 0.7s steps(1, end) infinite;
+}
+
+@keyframes capy-hover {
+  0%     { background-position:   0px   0px; }
+  12.5%  { background-position: -48px   0px; }
+  25%    { background-position: -96px   0px; }
+  37.5%  { background-position: -144px  0px; }
+  50%    { background-position:   0px -52px; }
+  62.5%  { background-position: -48px -52px; }
+  75%    { background-position: -96px -52px; }
+  87.5%  { background-position: -144px -52px; }
+}
+
+@keyframes capy-spin {
+  0%     { background-position:   0px -104px; }
+  12.5%  { background-position: -48px -104px; }
+  25%    { background-position: -96px -104px; }
+  37.5%  { background-position: -144px -104px; }
+  50%    { background-position:   0px -156px; }
+  62.5%  { background-position: -48px -156px; }
+  75%    { background-position: -96px -156px; }
+  87.5%  { background-position: -144px -156px; }
+}

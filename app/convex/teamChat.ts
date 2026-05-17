@@ -219,6 +219,66 @@ export const clearThread = mutation({
   },
 });
 
+// ── Read receipts ────────────────────────────────────────────────────────────
+//
+// All unread state lives on the server using server-side `Date.now()` so that
+// `lastMessageAt` (set in sendMessage / addAriaMessage) and the read stamps
+// share the same clock. The previous client-side localStorage approach drifted
+// any time the client clock disagreed with the server clock — leaving the red
+// dot lit even after the user had opened the thread.
+
+export const markThreadRead = mutation({
+  args: {
+    threadId: v.id("chatThreads"),
+    userId: v.string(),
+    // Optional forward-looking grace window (ms). Used on thread-leave to
+    // absorb trailing messages that arrive a beat after the user clicks back
+    // (e.g. Aria's reply chain). 0 on enter, ~6000 on leave.
+    grace: v.optional(v.number()),
+  },
+  handler: async (ctx, { threadId, userId, grace }) => {
+    const thread = await ctx.db.get(threadId);
+    if (!thread) return;
+    const proposed = Date.now() + (grace ?? 0);
+    const current = thread.readBy?.[userId] ?? 0;
+    // Math.max guards against out-of-order mutation delivery (e.g. a fast
+    // enter+leave where the leave mutation lands first).
+    const next = Math.max(current, proposed);
+    if (next === current) return;
+    await ctx.db.patch(threadId, {
+      readBy: { ...(thread.readBy ?? {}), [userId]: next },
+    });
+  },
+});
+
+export const markPanelSeen = mutation({
+  args: { userId: v.string() },
+  handler: async (ctx, { userId }) => {
+    const existing = await ctx.db
+      .query("userChatState")
+      .withIndex("by_userId", (q) => q.eq("userId", userId))
+      .unique();
+    const now = Date.now();
+    if (!existing) {
+      await ctx.db.insert("userChatState", { userId, panelLastSeenAt: now });
+      return;
+    }
+    if (now > existing.panelLastSeenAt) {
+      await ctx.db.patch(existing._id, { panelLastSeenAt: now });
+    }
+  },
+});
+
+export const getUserChatState = query({
+  args: { userId: v.string() },
+  handler: async (ctx, { userId }) => {
+    return await ctx.db
+      .query("userChatState")
+      .withIndex("by_userId", (q) => q.eq("userId", userId))
+      .unique();
+  },
+});
+
 export const addAriaMessage = internalMutation({
   args: {
     threadId: v.id("chatThreads"),

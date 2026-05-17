@@ -38,6 +38,7 @@ export const Code = (p: IconProps) => <Icon {...p}><path d="m16 18 6-6-6-6M8 6l-
 export const Pdf = (p: IconProps) => <Icon {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 13h1.5a1.5 1.5 0 1 1 0 3H8zM8 16v2M13 13v5M13 13h1.5a1.5 1.5 0 1 1 0 3H13M17 13v5M17 13h2.5M17 15.5h2" strokeWidth="1.2" /></Icon>;
 export const ArrowUp = (p: IconProps) => <Icon {...p}><path d="M12 19V5M5 12l7-7 7 7" /></Icon>;
 export const SwitchArrows = (p: IconProps) => <Icon {...p}><path d="M17 4l4 4-4 4M3 8h18M7 20l-4-4 4-4M21 16H3" /></Icon>;
+export const Shuffle = (p: IconProps) => <Icon {...p}><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5" /></Icon>;
 export const ChevronLeft = (p: IconProps) => <Icon {...p}><path d="M15 18l-6-6 6-6" /></Icon>;
 export const ChevronRight = (p: IconProps) => <Icon {...p}><path d="M9 18l6-6-6-6" /></Icon>;
 export const ChevronDown = (p: IconProps) => <Icon {...p}><path d="M6 9l6 6 6-6" /></Icon>;

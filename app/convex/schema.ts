@@ -156,9 +156,22 @@ export default defineSchema({
     lastMessageAt: v.optional(v.number()),
     lastAuthorId: v.optional(v.string()),
     name: v.optional(v.string()),
+    // Per-user "last read" stamp (server time). Compared against lastMessageAt
+    // to decide whether the per-thread unread dot should show. Server-side
+    // because the previous client-side localStorage approach drifted whenever
+    // the client clock disagreed with the Convex server clock.
+    readBy: v.optional(v.record(v.string(), v.number())),
   })
     .index("by_type", ["type"])
     .index("by_lastMessageAt", ["lastMessageAt"]),
+
+  // Per-user, panel-level "I have looked at the chat list" stamp. Separate
+  // from per-thread readBy because the outer pill badge clears on panel open
+  // even if individual threads stay unread.
+  userChatState: defineTable({
+    userId: v.string(),
+    panelLastSeenAt: v.number(),
+  }).index("by_userId", ["userId"]),
 
   chatMessages: defineTable({
     threadId: v.id("chatThreads"),
