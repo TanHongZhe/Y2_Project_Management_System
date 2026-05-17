@@ -56,7 +56,7 @@ export default function Settings({ tweaks, setTweak, selectedThreadId, searchBar
     setExporting(true);
     try {
       const lines: string[] = [];
-      lines.push(`# Y2 Solar Bus Demonstrator — Project Export`);
+      lines.push(`# Y2 Smart Grid System — Project Export`);
       lines.push(`_Generated ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC_\n`);
 
       lines.push("---\n");

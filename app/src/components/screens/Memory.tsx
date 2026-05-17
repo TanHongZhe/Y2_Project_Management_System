@@ -136,7 +136,7 @@ export default function Memory({ readOnly, searchBar, currentUserId }: { readOnl
             project_memory
           </div>
           <h1 style={{ fontSize: 22, fontWeight: 600, margin: "0 0 4px", letterSpacing: "-0.01em" }}>
-            Solar Bus Demonstrator — Living Memory
+            Smart Grid System — Living Memory
           </h1>
           <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-muted)" }}>
             last updated {lastUpdateStr} · {(bytes / 1024).toFixed(1)} kB · {totalEntries} sections

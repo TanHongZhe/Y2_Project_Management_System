@@ -17,7 +17,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "Project Memory — Y2 PMS",
-  description: "Solar Bus Demonstrator — Project Management System",
+  description: "Smart Grid System — Project Management System",
   icons: {
     icon: "/Y2_logo.png",
     shortcut: "/Y2_logo.png",

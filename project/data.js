@@ -4,8 +4,8 @@
 window.APP_DATA = {
   project: {
     id: "Y2-PMS-001",
-    name: "Solar Bus Demonstrator",
-    course: "ENG2-SYS",
+    name: "Smart Grid System",
+    course: "ELEC50015",
     semester: "Spring 26",
     started: "2026-02-04",
     lastSync: "2026-05-14 11:42",

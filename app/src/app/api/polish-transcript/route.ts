@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
     ? `\nProject context:\n${projectContext.trim()}\n`
     : "";
 
-  const prompt = `You are a meeting minutes writer for a university engineering project called "Solar Bus Demonstrator" (ENG2-SYS).
+  const prompt = `You are a meeting minutes writer for a university engineering project called "Smart Grid System" (ELEC50015).
 
 Team members: ${teamNames}
 ${attendeesLine}

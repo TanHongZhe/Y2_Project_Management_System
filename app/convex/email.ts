@@ -38,7 +38,7 @@ function buildHtml(heading: string, body: string): string {
 <html>
 <body style="font-family:system-ui,sans-serif;background:#111;color:#e5e5e5;padding:32px;max-width:520px;margin:0 auto;">
   <div style="background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:24px;">
-    <div style="font-family:monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#666;margin-bottom:8px;">Y2-PMS-001 · Solar Bus Demonstrator</div>
+    <div style="font-family:monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#666;margin-bottom:8px;">Y2-PMS-001 · Smart Grid System</div>
     <h2 style="margin:0 0 16px;font-size:18px;color:#fff;">${heading}</h2>
     <div style="color:#ccc;line-height:1.6;">${body}</div>
     <div style="margin-top:20px;">

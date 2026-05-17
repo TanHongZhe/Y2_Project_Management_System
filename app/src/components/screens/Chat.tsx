@@ -6,6 +6,7 @@ import { api } from '../../../convex/_generated/api';
 import { Id, Doc } from '../../../convex/_generated/dataModel';
 import { MODELS } from '@/lib/models';
 import { renderMarkdown } from '@/lib/markdown';
+import { playMessageSound } from '@/lib/sound';
 import * as Icons from '../Icons';
 
 interface Tweaks {
@@ -346,6 +347,13 @@ export default function Chat({ tweaks, setRoute: _setRoute, selectedThreadId, on
     setClarificationQueue([]);
     setClarificationAnswers([]);
   }, [threadId]);
+
+  // Play sound when AI finishes responding
+  const prevStreamingRef = useRef(false);
+  useEffect(() => {
+    if (prevStreamingRef.current && !streaming) playMessageSound();
+    prevStreamingRef.current = streaming;
+  }, [streaming]);
 
   const memoryNotes = useQuery(api.memoryNotes.list, {});
   const recentDocs = useQuery(api.documents.list, { limit: 8 });

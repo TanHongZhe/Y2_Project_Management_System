@@ -6,7 +6,7 @@ const DOC_CONTENTS = {
     type: "md",
     body: (
       <>
-        <h1>Solar Bus Demonstrator</h1>
+        <h1>Smart Grid System</h1>
         <div className="doc-meta">
           <span>README.md</span>
           <span>4.2 kB</span>

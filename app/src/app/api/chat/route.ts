@@ -204,7 +204,7 @@ const TOOLS: ToolDefinition[] = [
   },
 ];
 
-const SYSTEM_PROMPT = `You are the project copilot for the Y2 Solar Bus Demonstrator — a small hardware project. Be concise, engineering-accurate, and grounded in retrieved context.
+const SYSTEM_PROMPT = `You are the project copilot for the Y2 Smart Grid System — a small hardware project. Be concise, engineering-accurate, and grounded in retrieved context.
 
 Rules:
 - Treat retrieved context (chunks, memory notes) as ground truth. Cite filenames when you quote specific numbers.

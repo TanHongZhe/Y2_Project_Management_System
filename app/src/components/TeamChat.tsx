@@ -5,6 +5,7 @@ import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { USERS, AppUser } from '../lib/users';
+import { playMessageSound } from '../lib/sound';
 import { MENTION_HANDLES, type MentionHandle } from '../lib/mentions';
 import * as Icons from './Icons';
 
@@ -457,6 +458,20 @@ export default function TeamChat({ currentUser, onNavigate, isOpen, onToggle, bu
   useEffect(() => {
     return () => { if (capyTimerRef.current) clearTimeout(capyTimerRef.current); };
   }, []);
+
+  // Play sound when a new message arrives from someone else
+  const prevMsgCountRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (prevMsgCountRef.current === null) {
+      prevMsgCountRef.current = messages.length;
+      return;
+    }
+    if (messages.length > prevMsgCountRef.current) {
+      const newest = messages[messages.length - 1];
+      if (newest?.authorId !== currentUser.id) playMessageSound();
+    }
+    prevMsgCountRef.current = messages.length;
+  }, [messages, currentUser.id]);
 
   function handleMsgsScroll() {
     const el = msgsRef.current;

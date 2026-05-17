@@ -43,7 +43,7 @@ export default function Login({ onSelect }: LoginProps) {
           <div className="login-header">
             <div className="login-logo">Y2 PMS</div>
             <h1 className="login-title">Who's using this?</h1>
-            <p className="login-sub">Solar Bus Demonstrator · ENG2-SYS · Spring 26</p>
+            <p className="login-sub">Smart Grid System · ELEC50015 · Spring 26</p>
           </div>
           <div className="login-grid">
             {teamUsers.map((user, i) => (

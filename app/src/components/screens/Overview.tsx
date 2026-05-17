@@ -15,7 +15,7 @@ interface OverviewProps {
   searchBar?: React.ReactNode;
 }
 
-const PROJECT_NAME = "Solar Bus Demonstrator";
+const PROJECT_NAME = "Smart Grid System";
 const DEMO_DAY = new Date("2026-06-18T00:00:00").getTime();
 const PROJECT_START = new Date("2026-05-13T00:00:00").getTime();
 
@@ -405,7 +405,7 @@ export default function Overview({ setRoute, currentUser, searchBar }: OverviewP
               <div className="countdown-hero">
                 <div className="countdown-days">{daysLeft}</div>
                 <div className="countdown-unit">days remaining</div>
-                <div className="countdown-event">18 June 2026 · ENG2-SYS</div>
+                <div className="countdown-event">18 June 2026 · ELEC50015</div>
                 <div className="countdown-progress" style={{ marginTop: 16 }}>
                   <span style={{ width: `${animatedElapsed}%` }} />
                 </div>

@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
 
   const sectionNames = existingMemory.map((n) => `"${n.section}"`).join(", ");
 
-  const prompt = `You are the living memory for a university engineering project called "Solar Bus Demonstrator" (ENG2-SYS). Your job is to extract EVERY piece of meaningful information from the meeting notes and store it in the right section.
+  const prompt = `You are the living memory for a university engineering project called "Smart Grid System" (ELEC50015). Your job is to extract EVERY piece of meaningful information from the meeting notes and store it in the right section.
 
 CURRENT PROJECT MEMORY (each section is labelled [SECTION: <name>]):
 ${memoryStr || "(empty — no sections yet)"}

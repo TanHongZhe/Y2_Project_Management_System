@@ -39,8 +39,8 @@ interface SidebarProps {
 
 const PROJECT = {
   id: "Y2-PMS-001",
-  name: "Solar Bus Demonstrator",
-  course: "ENG2-SYS",
+  name: "Smart Grid System",
+  course: "ELEC50015",
   semester: "Spring 26",
 };
 
