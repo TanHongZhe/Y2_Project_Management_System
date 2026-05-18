@@ -1,16 +1,14 @@
 import { v } from "convex/values";
 import { internalAction, internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
-
-const USER_EMAILS: Record<string, string> = {
-  "hong-zhe":  "hongzhetan7@gmail.com",
-  "wei-zen":   "ooiweizen@gmail.com",
-  "chun-wen":  "ooichunwen04@gmail.com",
-  "yong-zhi":  "tongyz06@gmail.com",
-  "dzuldiniy": "dzuldiniy.h@gmail.com",
-  "fangnan":   "7l3e0rizonix@gmail.com",
-  "yida":      "wyida7372@gmail.com",
-};
+const USER_EMAILS: Record<string, string> = (() => {
+  try {
+    return JSON.parse(process.env.USER_EMAILS_JSON || "{}");
+  } catch (e) {
+    console.error("[email] Failed to parse USER_EMAILS_JSON environment variable:", e);
+    return {};
+  }
+})();
 
 async function callResend(apiKey: string, to: string, subject: string, html: string) {
   const res = await fetch("https://api.resend.com/emails", {
